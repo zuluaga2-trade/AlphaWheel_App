@@ -1,0 +1,184 @@
+import streamlit as st
+import pandas as pd
+import sqlite3
+import io
+import plotly.express as px
+import plotly.graph_objects as go
+from tradier_engine import TradierClient
+import trading_logic as tl
+from datetime import datetime, date
+
+st.set_page_config(page_title="AlphaWheel Pro", layout="wide", page_icon="🦅")
+
+# --- ESTILOS ---
+st.markdown("""
+<style>
+    .stApp { background-color: #0d1117; color: #c9d1d9; }
+    [data-testid="stMetricValue"] { color: #58a6ff !important; font-size: 20px; }
+    .progress-label { font-size: 14px; font-weight: bold; margin: 15px 0 5px 0; }
+    .dte-pill { padding: 8px; border-radius: 6px; font-size: 12px; font-weight: bold; text-align: center; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 5px; }
+</style>
+""", unsafe_allow_html=True)
+
+def safe_float(val):
+    try: return float(val) if val is not None else 0.0
+    except: return 0.0
+
+# --- CARGA DE DATOS ---
+conn = sqlite3.connect('trading_app.db')
+accounts_df = pd.read_sql_query("SELECT * FROM Accounts", conn)
+df_options = pd.read_sql_query("SELECT DISTINCT ticker FROM Trades WHERE status='OPEN' AND asset_type='OPTION'", conn)
+df_stocks = pd.read_sql_query("SELECT DISTINCT ticker FROM Trades WHERE status='OPEN' AND asset_type='STOCK'", conn)
+conn.close()
+
+with st.sidebar:
+    st.header("🦅 Alpha Management")
+    acc_name = st.selectbox("Cuenta Activa", accounts_df['name'].tolist())
+    acc_data = accounts_df[accounts_df['name'] == acc_name].iloc[0]
+    
+    with st.expander("➕ Registro de Operación", expanded=True):
+        strat = st.selectbox("Estrategia", ["CSP", "CC", "Roll Over", "Compra Acción"])
+        
+        buy_write = False
+        if strat == "CC":
+            buy_write = st.checkbox("¿Nueva Compra + CC? (Buy-Write)")
+
+        with st.form("entry_form", clear_on_submit=True):
+            f_inicio = st.date_input("Fecha", value=date.today())
+            
+            # Ticker dinámico
+            if strat == "Roll Over" and not df_options.empty:
+                sym = st.selectbox("Ticker", df_options['ticker'].tolist())
+            elif strat == "CC" and not df_stocks.empty and not buy_write:
+                sym = st.selectbox("Ticker (Posees Acciones)", df_stocks['ticker'].tolist())
+            else:
+                sym = st.text_input("Ticker").upper().strip()
+            
+            c1, c2 = st.columns(2)
+            
+            # LÓGICA DE FORMULARIO SEGÚN ESTRATEGIA
+            if strat == "Compra Acción":
+                qty = c1.number_input("Cantidad Acciones", min_value=1, step=1, value=100)
+                px_in = c2.number_input("Precio por Acción", format="%.2f")
+                stk, exp = 0.0, None
+            else:
+                with c1:
+                    qty = st.number_input("Cant. Contratos", min_value=1, value=1)
+                    px_opt = st.number_input("Prima (Crédito)", format="%.2f")
+                with c2:
+                    stk = st.number_input("Strike", format="%.2f")
+                    exp = st.date_input("Expiración")
+                
+                if buy_write:
+                    st.markdown("---")
+                    px_stock = st.number_input("Precio Compra Acción", format="%.2f")
+
+            if st.form_submit_button("Registrar"):
+                if sym:
+                    conn = sqlite3.connect('trading_app.db')
+                    f_s = f_inicio.strftime('%Y-%m-%d')
+                    e_s = exp.strftime('%Y-%m-%d') if exp else None
+                    
+                    if strat == "Compra Acción":
+                        conn.execute("INSERT INTO Trades (trade_date, account_name, ticker, asset_type, quantity, price, strike, strategy_type, status) VALUES (?,?,?,?,?,?,?,?,?)",
+                                     (f_s, acc_name, sym, "STOCK", qty, px_in, 0.0, strat, 'OPEN'))
+                    else:
+                        if buy_write:
+                            conn.execute("INSERT INTO Trades (trade_date, account_name, ticker, asset_type, quantity, price, strike, strategy_type, status) VALUES (?,?,?,?,?,?,?,?,?)",
+                                         (f_s, acc_name, sym, "STOCK", qty * 100, px_stock, 0.0, 'Compra Acción', 'OPEN'))
+                        
+                        conn.execute("INSERT INTO Trades (trade_date, account_name, ticker, asset_type, quantity, price, strike, expiration_date, strategy_type, status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                     (f_s, acc_name, sym, "OPTION", qty, px_opt, stk, e_s, strat, 'OPEN'))
+                    
+                    conn.commit(); conn.close()
+                    st.cache_data.clear(); st.rerun()
+
+# --- TABLERO PRINCIPAL ---
+tab1, tab2 = st.tabs(["📊 Dashboard", "📑 Reportes"])
+
+with tab1:
+    client = TradierClient(acc_data['access_token'])
+    conn = sqlite3.connect('trading_app.db')
+    df_all = pd.read_sql_query(f"SELECT * FROM Trades WHERE account_name='{acc_name}' AND status='OPEN'", conn)
+    conn.close()
+
+    if not df_all.empty:
+        precios = {t: (client.get_quote(t) or 0.0) for t in df_all['ticker'].unique()}
+        rows = []
+        for t in df_all['ticker'].unique():
+            df_t = df_all[df_all['ticker'] == t]
+            mkt = precios.get(t, 0.0)
+            
+            # Cálculos de Capital y Primas
+            inv_stock = sum([r['price'] * r['quantity'] for _, r in df_t.iterrows() if r['asset_type'] == 'STOCK'])
+            inv_csp = sum([r['strike'] * r['quantity'] * 100 for _, r in df_t.iterrows() if r['strategy_type'] == 'CSP'])
+            total_inv = inv_stock + inv_csp
+            
+            total_prima = sum([r['price'] * r['quantity'] * 100 for _, r in df_t.iterrows() if r['asset_type'] == 'OPTION'])
+            
+            last = df_t.iloc[-1]
+            dte = tl.calculate_dte(last['expiration_date'])
+            roi = (total_prima / total_inv * 100) if total_inv > 0 else 0
+            
+            # RESTABLECIMIENTO DE COLUMNAS SOLICITADAS
+            rows.append({
+                "Activo": t,
+                "Estrategia": last['strategy_type'],
+                "MKT": mkt,
+                "Strike": safe_float(last['strike']),
+                "Prima Tot": total_prima,
+                "BE": safe_float(last['strike']) - (total_prima/100) if "CSP" in last['strategy_type'] else mkt,
+                "Status": "🔴 ITM" if ((last['strategy_type']=="CSP" and mkt<safe_float(last['strike'])) or (last['strategy_type']=="CC" and mkt>safe_float(last['strike']))) else "🟢 OTM",
+                "DTE": dte,
+                "Capital": total_inv,
+                "ROI%": f"{roi:.2f}%",
+                "Peso%": (total_inv / acc_data['cap_total'] * 100)
+            })
+        
+        df_display = pd.DataFrame(rows)
+
+        # KPIs y Gráficas
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Capital Cuenta", f"${acc_data['cap_total']:,.0f}")
+        k2.metric("Primas Cobradas", f"${df_display['Prima Tot'].sum():,.2f}")
+        k3.metric("Uso Margen", f"{(df_display['Capital'].sum()/acc_data['cap_total']*100):.1f}%")
+
+        st.markdown("---")
+        g1, g2 = st.columns(2)
+        with g1: st.plotly_chart(px.pie(df_display, values='Capital', names='Activo', hole=0.4, title="Distribución"), use_container_width=True)
+        with g2: 
+            fig_bar = px.bar(df_display, x='Activo', y='Peso%', title="Concentración")
+            fig_bar.add_hline(y=acc_data['max_per_ticker'], line_dash="dash", line_color="red")
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # TABLA MONITOR
+        st.subheader("📋 Monitor de Posiciones")
+        selection = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
+
+        if selection and selection.selection.rows:
+            sel_ticker = df_display.iloc[selection.selection.rows[0]]['Activo']
+            st.markdown("---")
+            
+            # GESTIÓN COMPACTA
+            st.subheader(f"🛠️ Historial: {sel_ticker}")
+            df_tx = df_all[df_all['ticker'] == sel_ticker].sort_values('trade_date', ascending=False)
+            h_cols = st.columns([1.5, 1.2, 1, 1, 1, 2])
+            h_cols[0].caption("Fecha"); h_cols[1].caption("Tipo"); h_cols[2].caption("Cant"); h_cols[3].caption("Px/Prima"); h_cols[4].caption("Strike"); h_cols[5].caption("Acciones")
+            
+            for _, tr in df_tx.iterrows():
+                r_cols = st.columns([1.5, 1.2, 1, 1, 1, 2])
+                r_cols[0].write(tr['trade_date']); r_cols[1].write(tr['strategy_type']); r_cols[2].write(str(tr['quantity']))
+                r_cols[3].write(f"{safe_float(tr['price']):.2f}"); r_cols[4].write(f"{safe_float(tr['strike']):.2f}")
+                with r_cols[5]:
+                    if st.button("🗑️", key=f"del_{tr['trade_id']}"):
+                        conn = sqlite3.connect('trading_app.db'); conn.execute("DELETE FROM Trades WHERE trade_id=?", (tr['trade_id'],)); conn.commit(); conn.close(); st.rerun()
+
+            # RADIOGRAFÍA
+            st.markdown("---")
+            st.subheader(f"🔍 Radiografía: {sel_ticker}")
+            r_data = df_display[df_display['Activo'] == sel_ticker].iloc[0]
+            fig_gauge = go.Figure(go.Indicator(mode="gauge+number+delta", value=r_data['MKT'], delta={'reference': r_data['Strike']},
+                gauge={'axis': {'range': [None, r_data['MKT']*1.5]}, 'steps': [{'range': [0, r_data['Strike']], 'color': "rgba(255,0,0,0.1)"}]}))
+            st.plotly_chart(fig_gauge, use_container_width=True)
+    else:
+        st.info("Sin posiciones abiertas.")

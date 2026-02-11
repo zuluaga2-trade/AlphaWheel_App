@@ -1,0 +1,7 @@
+Realiza una búsqueda web en tiempo real para el día de hoy lunes 9 de febrero del 2026. Dame el reporte de apertura para SPY:
+Precio actual y cierre del día anterior.
+Muros de Gamma (Call Wall, Put Wall y Zero Gamma).
+Niveles de soporte y resistencia críticos para scalping en gráficos de 2 y 5 minutos.
+Plan de acción: Escenario alcista vs bajista para los primeros 30 min de mercado.
+Analiza noticias y eventos relevantes del mercado de valores de NY para el día de hoy.
+Resumen de noticias de la administración Trump con impacto en la volatilidad.
