@@ -1,6 +1,7 @@
 # AlphaWheel Pro - Autenticación: hash de contraseña y login/registro
 import hashlib
 import secrets
+from pathlib import Path
 from typing import Optional, Tuple
 
 from database import db
@@ -87,3 +88,32 @@ def is_logged_in() -> bool:
     """Comprueba si hay usuario logueado en session_state."""
     import streamlit as st
     return bool(st.session_state.get("logged_in") and st.session_state.get("user_id"))
+
+
+def _last_login_file() -> Path:
+    """Ruta del archivo donde guardamos el último email (recordar dispositivo)."""
+    root = Path(__file__).resolve().parent.parent
+    streamlit_dir = root / ".streamlit"
+    streamlit_dir.mkdir(exist_ok=True)
+    return streamlit_dir / "last_login_email"
+
+
+def get_last_login_email() -> str:
+    """Devuelve el último email con el que se inició sesión (para pre-rellenar)."""
+    try:
+        p = _last_login_file()
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip().lower() or ""
+    except Exception:
+        pass
+    return ""
+
+
+def set_last_login_email(email: str) -> None:
+    """Guarda el email tras un login exitoso (recordar dispositivo)."""
+    try:
+        email = (email or "").strip().lower()
+        if email:
+            _last_login_file().write_text(email, encoding="utf-8")
+    except Exception:
+        pass

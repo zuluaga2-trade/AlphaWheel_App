@@ -314,22 +314,6 @@ def build_gauge_price_axis(
 
     shapes: list[dict] = []
 
-    # Marco luminoso del semicírculo (borde neón)
-    r_neon = 0.32
-    path_parts = []
-    for i in range(51):
-        t = i / 50.0
-        a = math.pi * (1.0 - t)
-        x = cx + r_neon * math.cos(a)
-        y = cy + r_neon * math.sin(a)
-        path_parts.append(f"{x:.3f},{y:.3f}")
-    shapes.append({
-        "type": "path",
-        "xref": "paper", "yref": "paper",
-        "path": "M " + " L ".join(path_parts),
-        "line": {"color": "#00ffff", "width": 2.5},
-    })
-
     x0_1, y0_1, x1_1, y1_1 = needle_segment(pos_strike)
     shapes.append({"type": "line", "xref": "paper", "yref": "paper",
         "x0": x0_1, "y0": y0_1, "x1": x1_1, "y1": y1_1,

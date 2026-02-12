@@ -4,7 +4,7 @@ Aplicación web **multi-usuario** para el control de estrategias de opciones (La
 
 ## Características
 
-- **Autenticación**: registro e inicio de sesión por email y contraseña. Sesión por usuario.
+- **Autenticación**: registro e inicio de sesión por email y contraseña. Sesión por usuario. El último email se recuerda en este dispositivo (solo hay que volver a escribir la contraseña tras cerrar sesión o actualizar).
 - **Multi-usuario y multi-cuenta**: cada usuario ve solo sus cuentas; puede crear varias (ej. IRA, Taxable, Sandbox).
 - **Token Tradier**: configurable por cuenta en **Mi cuenta**. Precios en tiempo real y estado Online/Offline.
 - **Dashboard**: Capital, meta anual, máximo por ticker, utilización, KPIs (ON TRACK / BEHIND), donut por ticker, barras de objetivo anual y expiraciones.
@@ -104,9 +104,16 @@ Para compartir la app con **pocos usuarios** manteniendo **acceso solo por email
 4. **Credenciales y datos de cada usuario**:
    - Los tokens (Tradier) y claves (Alpha Vantage) se guardan **por usuario/cuenta** en la base de datos, no en el código.
    - La BD no es accesible desde fuera; solo la app en el servidor la lee. Cada usuario ve solo sus cuentas y posiciones.
-   - **Persistencia**: en Streamlit Cloud el disco es efímero; la BD se reinicia en cada redeploy. Para datos persistentes conviene usar una BD externa (PostgreSQL en Supabase/Neon, etc.) y definir `ALPHAWHEEL_DB_PATH` o adaptar `config.py` para una URL de conexión. Para pocos usuarios y uso ligero, puedes asumir que cada redeploy empieza de cero salvo que configures BD externa.
 
-5. **Resumen**: acceso restringido por lista de emails + credenciales y cuentas de cada usuario guardadas en la app (BD), no expuestas. Ideal para compartir con un grupo reducido manteniendo control de quién entra.
+5. **Persistencia: no perder usuarios ni datos en redeploys**:
+   - **Local**: la BD está en la raíz del proyecto (`trading_app.db`) y persiste entre reinicios y actualizaciones; no hace falta volver a registrarse.
+   - **Streamlit Cloud (y otros hosts)**: el disco es efímero; si no configuras BD externa, cada redeploy borra usuarios y datos. Para evitarlo, usa **PostgreSQL** y define en **Secrets** la URL de conexión:
+   ```toml
+   ALPHAWHEEL_DATABASE_URL = "postgresql://usuario:contraseña@host:5432/nombre_bd"
+   ```
+   - **Obtener PostgreSQL gratis**: [Neon](https://neon.tech) o [Supabase](https://supabase.com) ofrecen PostgreSQL en la nube (plan free). Creas un proyecto, copias la connection string y la pegas en `ALPHAWHEEL_DATABASE_URL`. La app crea las tablas solas al arrancar; usuarios y posiciones quedan guardados entre redeploys.
+
+6. **Resumen**: acceso restringido por lista de emails + credenciales y cuentas en la app. Con `ALPHAWHEEL_DATABASE_URL` (PostgreSQL) no se pierden usuarios ni datos al actualizar el código.
 
 ## Licencia
 

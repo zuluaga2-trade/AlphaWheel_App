@@ -47,6 +47,7 @@ Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
+.streamlit/last_login_email
 
 # Logs y temporales
 *.log

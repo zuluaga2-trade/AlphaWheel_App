@@ -10,12 +10,18 @@ if str(ROOT) not in sys.path:
 import streamlit as st
 
 from database.db import init_db, get_user_by_email
-from auth.auth import login_user, register_user, is_logged_in, logout_user
+from auth.auth import login_user, register_user, is_logged_in, logout_user, get_last_login_email, set_last_login_email
 from app.styles import PROFESSIONAL_CSS
 
 init_db()
 
-st.set_page_config(page_title="AlphaWheel Pro", layout="wide", page_icon="🦅", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="AlphaWheel Pro",
+    layout="wide",
+    page_icon="🦅",
+    initial_sidebar_state="collapsed",
+    menu_items={"Get help": None, "Report a Bug": None, "About": None},
+)
 st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
 
 
@@ -30,12 +36,19 @@ def render_login_register():
         tab_login, tab_register = st.tabs(["Iniciar sesión", "Registrarse"])
         with tab_login:
             with st.form("login_form"):
-                email_login = st.text_input("Email", placeholder="tu@email.com", key="login_email").strip().lower()
+                last_email = get_last_login_email()
+                email_login = st.text_input(
+                    "Email",
+                    value=last_email,
+                    placeholder="tu@email.com",
+                    key="login_email",
+                ).strip().lower()
                 password_login = st.text_input("Contraseña", type="password", key="login_pass")
                 if st.form_submit_button("Entrar"):
                     if email_login and password_login:
                         user_id = login_user(email_login, password_login)
                         if user_id:
+                            set_last_login_email(email_login)
                             user = get_user_by_email(email_login)
                             st.session_state["logged_in"] = True
                             st.session_state["user_id"] = user_id

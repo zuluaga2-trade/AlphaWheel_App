@@ -111,7 +111,40 @@ ALPHAWHEEL_ALLOWED_EMAILS = "zuluaga2@gmail.com,deiviselchutas@gmail.com,zuluaga
 |------|--------|-----------|
 | 1 | GitHub | Crear repo → copiar URL |
 | 2 | PC | `git init` (si aplica) → `git add .` → `git commit` → `git remote add origin URL` → `git push -u origin main` |
-| 3 | Streamlit Cloud | New app → repo `app/Home.py` → Advanced settings → Secrets: `ALPHAWHEEL_ALLOWED_EMAILS = "zuluaga2@gmail.com,deiviselchutas@gmail.com,zuluagacamilo1@hotmail.com"` → Deploy |
-| 4 | Uso | Compartir la URL de la app solo con los tres usuarios; ellos se registran con su email y contraseña |
+| 3 | Streamlit Cloud | New app → repo `app/Home.py` → Advanced settings → Secrets: `ALPHAWHEEL_ALLOWED_EMAILS = "..."` → Deploy |
+| 4 | Uso | Compartir la URL de la app solo con los usuarios autorizados; ellos se registran con su email y contraseña |
+| 5 (opcional) | Neon/Supabase + Secrets | Añadir `ALPHAWHEEL_DATABASE_URL` con URL de PostgreSQL para que usuarios y datos no se pierdan en redeploys (sección 5) |
 
-Credenciales (Tradier, Alpha Vantage) y datos de cada usuario se guardan en la base de datos de la app; cada uno solo ve sus cuentas. En Streamlit Cloud el disco es efímero (la BD se reinicia en cada redeploy); si más adelante quieres datos persistentes, se puede configurar una base externa (PostgreSQL, etc.).
+Credenciales (Tradier, Alpha Vantage) y datos de cada usuario se guardan en la base de datos de la app; cada uno solo ve sus cuentas.
+
+---
+
+## 5. No perder usuarios ni datos en redeploys (PostgreSQL)
+
+En Streamlit Cloud el disco es efímero: cada redeploy borra la base de datos y hay que volver a registrarse. Para evitarlo, usa **PostgreSQL** en la nube y define la URL en Secrets.
+
+### 5.1 Crear PostgreSQL gratis (Neon o Supabase)
+
+**Opción A — [Neon](https://neon.tech)**  
+1. Regístrate (gratis).  
+2. Crea un proyecto y una base de datos.  
+3. En **Connection string** copia la URL tipo:  
+   `postgresql://usuario:contraseña@ep-xxx.region.aws.neon.tech/neondb?sslmode=require`
+
+**Opción B — [Supabase](https://supabase.com)**  
+1. Regístrate (gratis).  
+2. Crea un proyecto.  
+3. En **Settings → Database** copia la **Connection string** (URI). Suele ser:  
+   `postgresql://postgres.[ref]:[PASSWORD]@aws-0-region.pooler.supabase.com:6543/postgres`
+
+### 5.2 Añadir la URL a Streamlit Secrets
+
+En [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**, añade (o edita) y deja todo en un solo bloque TOML:
+
+```toml
+ALPHAWHEEL_ALLOWED_EMAILS = "zuluaga2@gmail.com,deiviselchutas@gmail.com,zuluagacamilo1@hotmail.com"
+ALPHAWHEEL_DATABASE_URL = "postgresql://usuario:contraseña@host:5432/nombre_bd"
+```
+
+Sustituye `ALPHAWHEEL_DATABASE_URL` por la URL real que te dio Neon o Supabase (con usuario, contraseña, host y nombre de BD).  
+La app crea las tablas al arrancar; no hace falta configurar nada más. Tras eso, usuarios y posiciones **persisten** entre redeploys y actualizaciones de código.

@@ -7,3 +7,5 @@ openpyxl>=3.1.0
 reportlab>=4.0.0
 yfinance>=0.2.0
 numpy>=1.24.0
+# PostgreSQL (opcional): para persistencia en Streamlit Cloud / redeploys)
+psycopg2-binary>=2.9.0

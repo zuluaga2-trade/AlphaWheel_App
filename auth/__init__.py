@@ -6,6 +6,8 @@ from .auth import (
     register_user,
     logout_user,
     is_logged_in,
+    get_last_login_email,
+    set_last_login_email,
 )
 
 __all__ = [
@@ -15,4 +17,6 @@ __all__ = [
     "register_user",
     "logout_user",
     "is_logged_in",
+    "get_last_login_email",
+    "set_last_login_email",
 ]

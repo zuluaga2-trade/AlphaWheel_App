@@ -1,8 +1,14 @@
 # AlphaWheel Pro - Configuración central
 import os
+from pathlib import Path
 
-# Base de datos (SQLite por defecto; cambiar a PostgreSQL en producción)
-DB_PATH = os.environ.get("ALPHAWHEEL_DB_PATH", "trading_app.db")
+# Base de datos: por defecto en la raíz del proyecto para que persista entre reinicios y actualizaciones.
+# Para no perder usuarios ni datos en despliegues (Streamlit Cloud, etc.), usar PostgreSQL:
+#   ALPHAWHEEL_DATABASE_URL = "postgresql://user:pass@host:5432/dbname"
+# Si DATABASE_URL está definido, se usa PostgreSQL; si no, se usa SQLite en DB_PATH.
+_root = Path(__file__).resolve().parent
+DB_PATH = os.environ.get("ALPHAWHEEL_DB_PATH", str(_root / "trading_app.db"))
+DATABASE_URL = os.environ.get("ALPHAWHEEL_DATABASE_URL", "").strip()
 
 # Restricción por email: solo estos usuarios pueden acceder (login y registro).
 # Variable de entorno ALPHAWHEEL_ALLOWED_EMAILS = emails separados por coma (ej. user1@mail.com,user2@mail.com).

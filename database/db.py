@@ -1,25 +1,154 @@
 # AlphaWheel Pro - Acceso a BD con aislamiento por user_id / account_id
+# Soporta SQLite (local) y PostgreSQL (nube, para no perder datos en redeploys)
 import sqlite3
 import os
 from pathlib import Path
 
 import config
 
-def _schema_path():
-    # schema.sql está en database/schema.sql (mismo nivel que db.py)
-    p = Path(__file__).parent / "schema.sql"
+try:
+    import psycopg2
+    from psycopg2 import extras as pg_extras
+    from psycopg2 import IntegrityError as pg_IntegrityError
+except ImportError:
+    psycopg2 = None
+    pg_extras = None
+    pg_IntegrityError = None
+
+
+def _is_postgres():
+    """True si está configurada una URL de PostgreSQL."""
+    url = getattr(config, "DATABASE_URL", "") or ""
+    return bool(url.startswith("postgresql://") and psycopg2 is not None)
+
+
+def _schema_path(name="schema.sql"):
+    p = Path(__file__).parent / name
     if p.exists():
         return p
-    return Path(__file__).parent.parent / "database" / "schema.sql"
+    return Path(__file__).parent.parent / "database" / name
+
+
+# --- Wrapper para PostgreSQL (misma API que SQLite: ? -> %s, lastrowid vía lastval()) ---
+class _PgCursorWrapper:
+    def __init__(self, cursor):
+        self._cur = cursor
+        self._lastrowid = None
+        try:
+            self._cur.execute("SELECT lastval()")
+            row = self._cur.fetchone()
+            self._lastrowid = row[0] if row and row[0] else None
+        except Exception:
+            pass
+
+    @property
+    def lastrowid(self):
+        return self._lastrowid
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        return dict(row) if row else None
+
+    def fetchall(self):
+        return [dict(r) for r in self._cur.fetchall()]
+
+
+def _pg_quote_user_table(sql: str) -> str:
+    """En PostgreSQL la tabla User debe ir entre comillas."""
+    for a, b in [
+        (" FROM User ", ' FROM "User" '),
+        (" INTO User ", ' INTO "User" '),
+        (" UPDATE User ", ' UPDATE "User" '),
+        (" DELETE FROM User ", ' DELETE FROM "User" '),
+    ]:
+        sql = sql.replace(a, b)
+    return sql
+
+
+class _PgConnWrapper:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=None):
+        sql = sql.replace("?", "%s")
+        sql = _pg_quote_user_table(sql)
+        cur = self._conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+        cur.execute(sql, params or ())
+        return _PgCursorWrapper(cur)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+    def executescript(self, sql):
+        for stmt in sql.split(";"):
+            stmt = stmt.strip()
+            if stmt and not stmt.startswith("--"):
+                self.execute(stmt)
+
 
 def get_conn():
+    """Conexión a SQLite o PostgreSQL según config. Misma API: conn.execute(sql, params), cur.lastrowid, cur.fetchone() (dict)."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        return _PgConnWrapper(conn)
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def _run_pg_schema(conn):
+    path = _schema_path("schema_pg.sql")
+    if not path.exists():
+        return
+    sql = path.read_text(encoding="utf-8")
+    for stmt in sql.split(";"):
+        stmt = stmt.strip()
+        if stmt and not stmt.startswith("--"):
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
+    conn.commit()
+
+
 def init_db():
-    """Crea o actualiza el esquema desde schema.sql. Aislamiento por user_id/account_id."""
-    schema_path = _schema_path()
+    """Crea o actualiza el esquema. SQLite: schema.sql + migraciones. PostgreSQL: schema_pg.sql (usuarios y datos persistentes)."""
+    if _is_postgres():
+        conn = get_conn()
+        try:
+            _run_pg_schema(conn)
+            # Migrar lista antigua a búnker Principal si existe columna screener_watchlist
+            try:
+                cur = conn.execute(
+                    'SELECT user_id, screener_watchlist FROM "User" WHERE screener_watchlist IS NOT NULL AND trim(screener_watchlist) != \'\''
+                )
+                for row in cur.fetchall():
+                    uid = row.get("user_id")
+                    wl = (row.get("screener_watchlist") or "") if row else ""
+                    if uid is None:
+                        continue
+                    try:
+                        conn.execute(
+                            "INSERT INTO UserBunker (user_id, name, tickers_text) VALUES (%s, %s, %s) ON CONFLICT (user_id, name) DO NOTHING",
+                            (uid, "Principal", wl),
+                        )
+                    except Exception:
+                        pass
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+        return
+
+    schema_path = _schema_path("schema.sql")
     if not schema_path.exists():
         schema_path = Path(__file__).parent / "schema.sql"
     with open(schema_path, "r", encoding="utf-8") as f:
@@ -28,19 +157,16 @@ def init_db():
     try:
         conn.executescript(sql)
         conn.commit()
-        # Migración: columna password_hash para autenticación multi-usuario
         try:
             conn.execute("ALTER TABLE User ADD COLUMN password_hash TEXT")
             conn.commit()
         except sqlite3.OperationalError:
             pass
-        # Migración: clave Alpha Vantage por cuenta (screener)
         try:
             conn.execute("ALTER TABLE Account ADD COLUMN av_api_key TEXT")
             conn.commit()
         except sqlite3.OperationalError:
             pass
-        # Migración: screener por usuario (no por cuenta)
         try:
             conn.execute("ALTER TABLE User ADD COLUMN av_api_key TEXT")
             conn.commit()
@@ -51,7 +177,6 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass
-        # Búnkeres por usuario (varios por usuario para búsquedas selectivas)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS UserBunker (
                 bunker_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +189,6 @@ def init_db():
             )
         """)
         conn.commit()
-        # Migrar lista única antigua al primer búnker "Principal"
         try:
             cur = conn.execute(
                 "SELECT user_id, screener_watchlist FROM User WHERE screener_watchlist IS NOT NULL AND trim(screener_watchlist) != ''"
@@ -242,6 +366,10 @@ def create_bunker(user_id: int, name: str, tickers_text: str = "") -> int | None
         return cur.lastrowid
     except sqlite3.IntegrityError:
         return None
+    except Exception as e:
+        if pg_IntegrityError and isinstance(e, pg_IntegrityError):
+            return None
+        raise
     finally:
         conn.close()
 
@@ -329,10 +457,16 @@ def set_account_connection_status(account_id: int, status: str):
     """status: 'online' | 'offline'."""
     conn = get_conn()
     try:
-        conn.execute(
-            "UPDATE Account SET connection_status = ?, connection_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE account_id = ?",
-            (status, account_id),
-        )
+        if _is_postgres():
+            conn.execute(
+                "UPDATE Account SET connection_status = %s, connection_checked_at = now() WHERE account_id = %s",
+                (status, account_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE Account SET connection_status = ?, connection_checked_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE account_id = ?",
+                (status, account_id),
+            )
         conn.commit()
     finally:
         conn.close()
