@@ -1173,6 +1173,27 @@ def run():
         st.warning("Sesión no válida. Vuelve a iniciar sesión.")
         return
 
+    # Botón "Abrir menú" visible en web y móvil (el toggle nativo a veces no se ve en Cloud/móvil)
+    _menu_html = """
+    <!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;">
+    <button type="button" id="am-btn" style="padding:0.5rem 0.75rem;background:#21262d;border:1px solid #58a6ff;color:#79c0ff;border-radius:8px;font-size:0.95rem;cursor:pointer;">☰ Menú</button>
+    <script>
+    document.getElementById('am-btn').onclick = function(){
+        try {
+            var doc = window.parent.document;
+            var t = doc.querySelector('[data-testid="collapsedControl"]') || doc.querySelector('header button') || doc.querySelector('button[aria-label]');
+            if (t) t.click();
+        } catch(e) {}
+    };
+    </script>
+    </body></html>
+    """
+    try:
+        import streamlit.components.v1 as components
+        components.html(_menu_html, height=45)
+    except Exception:
+        st.caption("☰ Usa el botón de menú arriba a la izquierda para abrir la barra lateral.")
+
     with st.sidebar:
         st.header("🦅 Alpha Control")
         st.markdown(
