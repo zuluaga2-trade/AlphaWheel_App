@@ -1403,6 +1403,19 @@ def run():
     acc_data = next((a for a in accounts if a["account_id"] == account_id), {}) if account_id else {}
     token = (acc_data.get("access_token") or "").strip() if account_id else ""
 
+    # Navegación en el contenido (para web/móvil cuando el toggle del sidebar no se ve)
+    st.caption("Si no ves la barra lateral, cambia de vista aquí:")
+    nc1, nc2 = st.columns(2)
+    with nc1:
+        if st.button("🔎 Screener", key="nav_content_screener", use_container_width=True):
+            st.session_state["main_view_radio"] = "🔎 Screener"
+            st.rerun()
+    with nc2:
+        if st.button("📊 Mi Cuenta", key="nav_content_micuenta", use_container_width=True):
+            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
+            st.rerun()
+    st.markdown("---")
+
     # Screener es por usuario y se muestra como vista separada (no pestaña de cuenta)
     if show_screener_page:
         render_screener_page(user_id)
