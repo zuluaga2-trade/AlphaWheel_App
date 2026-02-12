@@ -457,6 +457,12 @@ def render_screener_page(user_id: int) -> None:
     # Analizar contrato manual (formato Thinkorswim)
     manual_sym = st.session_state.get("screener_manual_symbol")
     if manual_sym:
+        col_back_tos, _ = st.columns([1, 4])
+        with col_back_tos:
+            if st.button("← Volver al menú", type="secondary", key="back_from_tos", use_container_width=True):
+                if "screener_manual_symbol" in st.session_state:
+                    del st.session_state["screener_manual_symbol"]
+                st.rerun()
         parsed = _parse_thinkorswim_symbol(manual_sym)
         if not parsed:
             st.error("Formato de símbolo no válido. Usa formato Thinkorswim: .ROOTYYMMDDP/CSTRIKE (ej. .NOW260227P105 o .NOW260227C108)")
@@ -602,7 +608,8 @@ def render_screener_page(user_id: int) -> None:
                                     is_put=is_put_f,
                                 )
                                 st.plotly_chart(fig_gauge_f, use_container_width=True)
-                                st.markdown(f"""<div class="rad-metrics rad-metrics-grid"><div class="rad-metric"><span class="k">Precio (actual)</span><span class="v">${fmt2(mkt_f)}</span></div><div class="rad-metric"><span class="k">Strike (ejercicio)</span><span class="v">${fmt2(strike)}</span></div><div class="rad-metric"><span class="k">BE (breakeven)</span><span class="v">${fmt2(be_f)}</span></div><div class="rad-metric"><span class="k">DTE (días a venc.)</span><span class="v">{dte_f} días</span></div><div class="rad-metric"><span class="k">Ret. periodo (%)</span><span class="v">{ret_pct_f:,.2f}%</span></div><div class="rad-metric"><span class="k">P&L actual ($)</span><span class="v">${fmt2(pnl_f)}</span></div><div class="rad-metric"><span class="k">Max ganancia ($)</span><span class="v" style="color:#3fb950">${fmt2(prems_f)}</span></div></div>""", unsafe_allow_html=True)
+                                pop_f = float(row.get("POP %", 0) or 0)
+                                st.markdown(f"""<div class="rad-metrics rad-metrics-grid"><div class="rad-metric"><span class="k">Precio (actual)</span><span class="v">${fmt2(mkt_f)}</span></div><div class="rad-metric"><span class="k">Strike (ejercicio)</span><span class="v">${fmt2(strike)}</span></div><div class="rad-metric"><span class="k">BE (breakeven)</span><span class="v">${fmt2(be_f)}</span></div><div class="rad-metric"><span class="k">DTE (días a venc.)</span><span class="v">{dte_f} días</span></div><div class="rad-metric"><span class="k">Ret. periodo (%)</span><span class="v">{ret_pct_f:,.2f}%</span></div><div class="rad-metric"><span class="k">POP %</span><span class="v">{pop_f:,.2f}%</span></div><div class="rad-metric"><span class="k">P&L actual ($)</span><span class="v">${fmt2(pnl_f)}</span></div><div class="rad-metric"><span class="k">Max ganancia ($)</span><span class="v" style="color:#3fb950">${fmt2(prems_f)}</span></div></div>""", unsafe_allow_html=True)
                                 with st.expander("📋 Copiar / Compartir resumen del contrato", expanded=False):
                                     copy_text_f = build_copyable_summary_from_row(row, "CSP" if is_put_f else "CC")
                                     st.text_area("Resumen", value=copy_text_f, height=160, key="copy_chain_fallback", disabled=True, label_visibility="collapsed")
@@ -749,6 +756,7 @@ def render_screener_page(user_id: int) -> None:
                         is_put=is_put_chart,
                     )
                     st.plotly_chart(fig_gauge_m, use_container_width=True)
+                    pop_m = float(row.get("POP %", 0) or 0)
                     st.markdown(
                         f"""
                         <div class="rad-metrics rad-metrics-grid">
@@ -757,6 +765,7 @@ def render_screener_page(user_id: int) -> None:
                             <div class="rad-metric"><span class="k">BE (breakeven)</span><span class="v">${fmt2(be_m)}</span></div>
                             <div class="rad-metric"><span class="k">DTE (días a venc.)</span><span class="v">{dte_m} días</span></div>
                             <div class="rad-metric"><span class="k">Ret. periodo (%)</span><span class="v">{ret_pct_m:,.2f}%</span></div>
+                            <div class="rad-metric"><span class="k">POP %</span><span class="v">{pop_m:,.2f}%</span></div>
                             <div class="rad-metric"><span class="k">P&L actual ($)</span><span class="v">${fmt2(pnl_m)}</span></div>
                             <div class="rad-metric"><span class="k">Max ganancia ($)</span><span class="v" style="color:#3fb950">${fmt2(prems_m)}</span></div>
                         </div>
@@ -967,7 +976,17 @@ def render_screener_page(user_id: int) -> None:
         except Exception:
             pass
     if selected_rows:
+        # Al seleccionar otra fila distinta a la que se cerró, volver a mostrar la ficha
+        if selected_rows[0] != st.session_state.get("screener_closed_row_index", -1):
+            st.session_state["screener_show_ficha"] = True
+    if selected_rows and st.session_state.get("screener_show_ficha", True):
         row = df.iloc[selected_rows[0]]
+        col_back_scr, _ = st.columns([1, 4])
+        with col_back_scr:
+            if st.button("← Volver a resultados", type="secondary", key="back_from_screener_ficha", use_container_width=True):
+                st.session_state["screener_show_ficha"] = False
+                st.session_state["screener_closed_row_index"] = selected_rows[0]
+                st.rerun()
         st.markdown("---")
         st.subheader(f"🔍 Ficha Sniper: {row['Ticker']} · Strike ${row['Strike']:,.2f}")
 
@@ -1047,6 +1066,7 @@ def render_screener_page(user_id: int) -> None:
             is_put=is_put,
         )
         st.plotly_chart(fig_gauge_scr, use_container_width=True)
+        pop_scr = float(row.get("POP %", 0) or 0)
         st.markdown(
             f"""
             <div class="rad-metrics rad-metrics-grid">
@@ -1055,6 +1075,7 @@ def render_screener_page(user_id: int) -> None:
                 <div class="rad-metric"><span class="k">BE (breakeven)</span><span class="v">${fmt2(be)}</span></div>
                 <div class="rad-metric"><span class="k">DTE (días a venc.)</span><span class="v">{dte_scr} días</span></div>
                 <div class="rad-metric"><span class="k">Ret. periodo (%)</span><span class="v">{ret_pct:,.2f}%</span></div>
+                <div class="rad-metric"><span class="k">POP %</span><span class="v">{pop_scr:,.2f}%</span></div>
                 <div class="rad-metric"><span class="k">P&L actual ($)</span><span class="v">${fmt2(pnl_scr)}</span></div>
                 <div class="rad-metric"><span class="k">Max ganancia ($)</span><span class="v" style="color:#3fb950">${fmt2(prems)}</span></div>
             </div>

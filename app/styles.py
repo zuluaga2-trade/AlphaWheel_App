@@ -268,9 +268,8 @@ PROFESSIONAL_CSS = """
         color: #c9d1d9 !important;
     }
     .stApp > header { background: linear-gradient(90deg, #0d1117 0%, #161b22 100%); border-bottom: 1px solid #21262d; }
-    /* Ocultar menú Manage app (Share, estrella, etc.) y pie de Streamlit */
+    /* Ocultar barra superior Manage app (Share, etc.) y pie; dejar visible el menú hamburguesa para abrir sidebar en móvil */
     header[data-testid="stHeader"] { visibility: hidden !important; }
-    #MainMenu { visibility: hidden !important; }
     footer { visibility: hidden !important; }
     [data-testid="stToolbar"] { visibility: hidden !important; }
     div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; border: 1px solid #21262d; }

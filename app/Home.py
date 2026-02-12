@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="AlphaWheel Pro",
     layout="wide",
     page_icon="🦅",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
     menu_items={"Get help": None, "Report a Bug": None, "About": None},
 )
 st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
