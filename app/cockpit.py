@@ -231,6 +231,19 @@ def render_screener_page(user_id: int) -> None:
     """
     Screener por usuario: barra lateral = formulario de filtros; cuerpo = dashboard de resultados.
     """
+    # Navegación en el contenido (para web/móvil sin sidebar)
+    st.markdown("**Ir a:**")
+    nav_s1, nav_s2 = st.columns(2)
+    with nav_s1:
+        if st.button("🔎 Screener", key="nav_screener_scr", use_container_width=True):
+            st.session_state["main_view_radio"] = "🔎 Screener"
+            st.rerun()
+    with nav_s2:
+        if st.button("📊 Mi Cuenta", key="nav_mi_cuenta_scr", use_container_width=True):
+            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
+            st.rerun()
+    st.markdown("---")
+
     token, env = _get_tradier_token_for_user(user_id)
     api_tradier = "https://api.tradier.com/v1/" if (env or "sandbox") == "prod" else "https://sandbox.tradier.com/v1/"
     headers_tradier = {"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"} if token else {}
@@ -1173,27 +1186,6 @@ def run():
         st.warning("Sesión no válida. Vuelve a iniciar sesión.")
         return
 
-    # Botón "Abrir menú" visible en web y móvil (el toggle nativo a veces no se ve en Cloud/móvil)
-    _menu_html = """
-    <!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;">
-    <button type="button" id="am-btn" style="padding:0.5rem 0.75rem;background:#21262d;border:1px solid #58a6ff;color:#79c0ff;border-radius:8px;font-size:0.95rem;cursor:pointer;">☰ Menú</button>
-    <script>
-    document.getElementById('am-btn').onclick = function(){
-        try {
-            var doc = window.parent.document;
-            var t = doc.querySelector('[data-testid="collapsedControl"]') || doc.querySelector('header button') || doc.querySelector('button[aria-label]');
-            if (t) t.click();
-        } catch(e) {}
-    };
-    </script>
-    </body></html>
-    """
-    try:
-        import streamlit.components.v1 as components
-        components.html(_menu_html, height=45)
-    except Exception:
-        st.caption("☰ Usa el botón de menú arriba a la izquierda para abrir la barra lateral.")
-
     with st.sidebar:
         st.header("🦅 Alpha Control")
         st.markdown(
@@ -1423,6 +1415,19 @@ def run():
     accounts = get_accounts_for_current_user()
     acc_data = next((a for a in accounts if a["account_id"] == account_id), {}) if account_id else {}
     token = (acc_data.get("access_token") or "").strip() if account_id else ""
+
+    # Navegación principal en el contenido (para web/móvil cuando el sidebar no se puede abrir)
+    st.markdown("**Ir a:**")
+    nav_c1, nav_c2 = st.columns(2)
+    with nav_c1:
+        if st.button("🔎 Screener", key="nav_screener", use_container_width=True):
+            st.session_state["main_view_radio"] = "🔎 Screener"
+            st.rerun()
+    with nav_c2:
+        if st.button("📊 Mi Cuenta", key="nav_mi_cuenta", use_container_width=True):
+            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
+            st.rerun()
+    st.markdown("---")
 
     # Screener es por usuario y se muestra como vista separada (no pestaña de cuenta)
     if show_screener_page:
