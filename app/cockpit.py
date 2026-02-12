@@ -231,19 +231,6 @@ def render_screener_page(user_id: int) -> None:
     """
     Screener por usuario: barra lateral = formulario de filtros; cuerpo = dashboard de resultados.
     """
-    # Navegación en el contenido (para web/móvil sin sidebar)
-    st.markdown("**Ir a:**")
-    nav_s1, nav_s2 = st.columns(2)
-    with nav_s1:
-        if st.button("🔎 Screener", key="nav_screener_scr", use_container_width=True):
-            st.session_state["main_view_radio"] = "🔎 Screener"
-            st.rerun()
-    with nav_s2:
-        if st.button("📊 Mi Cuenta", key="nav_mi_cuenta_scr", use_container_width=True):
-            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
-            st.rerun()
-    st.markdown("---")
-
     token, env = _get_tradier_token_for_user(user_id)
     api_tradier = "https://api.tradier.com/v1/" if (env or "sandbox") == "prod" else "https://sandbox.tradier.com/v1/"
     headers_tradier = {"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"} if token else {}
@@ -1415,19 +1402,6 @@ def run():
     accounts = get_accounts_for_current_user()
     acc_data = next((a for a in accounts if a["account_id"] == account_id), {}) if account_id else {}
     token = (acc_data.get("access_token") or "").strip() if account_id else ""
-
-    # Navegación principal en el contenido (para web/móvil cuando el sidebar no se puede abrir)
-    st.markdown("**Ir a:**")
-    nav_c1, nav_c2 = st.columns(2)
-    with nav_c1:
-        if st.button("🔎 Screener", key="nav_screener", use_container_width=True):
-            st.session_state["main_view_radio"] = "🔎 Screener"
-            st.rerun()
-    with nav_c2:
-        if st.button("📊 Mi Cuenta", key="nav_mi_cuenta", use_container_width=True):
-            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
-            st.rerun()
-    st.markdown("---")
 
     # Screener es por usuario y se muestra como vista separada (no pestaña de cuenta)
     if show_screener_page:
