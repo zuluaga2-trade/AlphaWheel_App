@@ -229,7 +229,7 @@ En la pestaña **📑 Reportes**:
 
 def render_screener_page(user_id: int) -> None:
     """
-    Screener por usuario: barra lateral = formulario de filtros; cuerpo = dashboard de resultados.
+    Screener por usuario: filtros y acciones en el contenido principal (web y móvil sin depender del sidebar).
     """
     token, env = _get_tradier_token_for_user(user_id)
     api_tradier = "https://api.tradier.com/v1/" if (env or "sandbox") == "prod" else "https://sandbox.tradier.com/v1/"
@@ -238,9 +238,8 @@ def render_screener_page(user_id: int) -> None:
     saved_av = (settings.get("av_api_key") or "").strip()
     bunkers = get_user_bunkers(user_id) if user_id else []
 
-    # ---------- Barra lateral: formulario del screener ----------
-    with st.sidebar:
-        st.subheader("🔎 Filtros del Screener")
+    # ---------- Filtros del Screener en el contenido principal (funciona en web y móvil) ----------
+    with st.expander("🔎 Filtros del Screener", expanded=True):
         estrategia = st.radio("Estrategia", ["Cash Secured Put (CSP)", "Covered Call (CC)"], horizontal=True, key="scr_estrategia")
         st.caption("DTE: días hasta vencimiento. Delta: rango objetivo (CSP típ. -0.35 a -0.10, CC 0.10 a 0.35).")
         col_dte1, col_dte2 = st.columns(2)
@@ -286,11 +285,10 @@ def render_screener_page(user_id: int) -> None:
         f_stoch = st.checkbox("Stoch < 30", value=False, key="scr_stoch")
         f_earnings = st.checkbox("Evitar earnings", value=False, key="scr_earn")
 
-        # Búnker para escaneo (varios búnkeres por usuario)
         bunker_options = [(b["bunker_id"], f"{b['name']} ({len([x for x in (b.get('tickers_text') or '').split(',') if x.strip()])} tickers)") for b in bunkers]
         if not bunker_options:
             selected_bunker_id = None
-            st.caption("Sin búnkeres. Crea uno en **Gestionar búnkers**.")
+            st.caption("Sin búnkeres. Crea uno en **Gestionar búnkers** (abajo).")
         else:
             idx_sel = st.selectbox("Búnker para escaneo", range(len(bunker_options)), format_func=lambda i: bunker_options[i][1], key="scr_bunker_sel")
             selected_bunker_id = bunker_options[idx_sel][0]
@@ -362,12 +360,12 @@ def render_screener_page(user_id: int) -> None:
                     del st.session_state["screener_manual_symbol"]
                 st.rerun()
 
-    # ---------- Cuerpo: mensajes si falta config o datos ----------
+    # ---------- Mensajes si falta config o datos ----------
     if not token:
-        st.info("Configura el **token Tradier** en **Mi cuenta** para ejecutar el barrido. Puedes editar el búnker y la clave Alpha Vantage en la barra lateral.")
+        st.info("Configura el **token Tradier** en **Mi cuenta** (cambia de vista arriba) para ejecutar el barrido.")
         return
     if not tickers_lista and not st.session_state.get("screener_manual_symbol"):
-        st.info("En la barra lateral: crea un **búnker** en **Gestionar búnkers** y selecciónalo, o elige **Individual** y escribe un ticker, o pega un símbolo Thinkorswim para analizar un contrato.")
+        st.info("Arriba: crea un **búnker** en **Gestionar búnkers** y selecciónalo, o elige **Individual** y escribe un ticker, o pega un símbolo Thinkorswim para analizar un contrato.")
         return
 
     @st.cache_data(ttl=86400, show_spinner=False)
@@ -1181,29 +1179,30 @@ def run():
         )
         st.caption(get_current_user_email())
 
-        # Screener es por usuario; Mi Cuenta son las pestañas ligadas a la cuenta
+        # Navegación: Screener o Mi Cuenta (sidebar mínimo para que local siga viendo el radio)
         main_view = st.radio("Ir a", ["🔎 Screener", "📊 Mi Cuenta"], key="main_view_radio", horizontal=True)
         show_screener_page = main_view == "🔎 Screener"
 
-        if not show_screener_page:
-            accounts = get_accounts_for_current_user()
-            if not accounts:
-                st.warning("Sin cuentas. Ve a **Mi cuenta** para crear una.")
-                account_id = None
-                acc_data = {}
-            else:
-                acc_names = [a["name"] for a in accounts]
-                idx = 0
-                if get_current_account_id():
-                    for i, a in enumerate(accounts):
-                        if a["account_id"] == get_current_account_id():
-                            idx = i
-                            break
-                sel_acc_name = st.selectbox("Cuenta activa", acc_names, index=idx, key="sel_acc")
-                acc_data = next(a for a in accounts if a["name"] == sel_acc_name)
-                set_current_account_id(acc_data["account_id"])
-                account_id = acc_data["account_id"]
-
+    # ---------- Contenido principal: cuenta, Roll-over, Añadir posición (web y móvil sin depender del sidebar) ----------
+    account_id = None
+    acc_data = {}
+    token = ""
+    if not show_screener_page:
+        accounts = get_accounts_for_current_user()
+        if not accounts:
+            st.warning("Sin cuentas. Ve a la pestaña **Mi cuenta** (abajo) para crear una.")
+        else:
+            acc_names = [a["name"] for a in accounts]
+            idx = 0
+            if get_current_account_id():
+                for i, a in enumerate(accounts):
+                    if a["account_id"] == get_current_account_id():
+                        idx = i
+                        break
+            sel_acc_name = st.selectbox("Cuenta activa", acc_names, index=idx, key="sel_acc")
+            acc_data = next(a for a in accounts if a["name"] == sel_acc_name)
+            set_current_account_id(acc_data["account_id"])
+            account_id = acc_data["account_id"]
             token = (acc_data.get("access_token") or "").strip() if account_id else ""
 
             if account_id and token:
@@ -1216,8 +1215,9 @@ def run():
                     st.error(f"🔴 Offline — {status.message}")
                     db.set_account_connection_status(account_id, "offline")
             elif account_id:
-                st.caption("Token no configurado. Pestaña **Mi cuenta** → Token Tradier")
+                st.caption("Token no configurado. Pestaña **Mi cuenta** (abajo) → Token Tradier")
 
+        if not show_screener_page:
             with st.expander("🔄 Roll-over", expanded=False):
                 if not account_id:
                     st.caption("Selecciona una cuenta para hacer roll-over.")
@@ -1403,8 +1403,8 @@ def run():
     acc_data = next((a for a in accounts if a["account_id"] == account_id), {}) if account_id else {}
     token = (acc_data.get("access_token") or "").strip() if account_id else ""
 
-    # Navegación en el contenido (para web/móvil cuando el toggle del sidebar no se ve)
-    st.caption("Si no ves la barra lateral, cambia de vista aquí:")
+    # Navegación principal (visible en web, móvil y local)
+    st.caption("Cambiar de vista:")
     nc1, nc2 = st.columns(2)
     with nc1:
         if st.button("🔎 Screener", key="nav_content_screener", use_container_width=True):
