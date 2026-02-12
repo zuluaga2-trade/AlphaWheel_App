@@ -677,10 +677,12 @@ with tab_dash:
                     estrategia_label = "Propias"
                 else:
                     estrategia_label = estrategia_raw
+                acciones_libres = get_stock_quantity(account_id, ticker)
                 rows.append({
                     "Activo": ticker,
                     "Estrategia": estrategia_label,
                     "Contratos": contracts,
+                    "Acciones libres": acciones_libres,
                     "Fecha inicio": fecha_inicio,
                     "Fecha exp.": fecha_exp,
                     "Días posición": dias_posicion,
@@ -845,13 +847,15 @@ with tab_dash:
             st.markdown('<div class="dashboard-card"><h3>Posiciones abiertas</h3>', unsafe_allow_html=True)
             # Tabla: Fecha inicio, Fecha exp., Contratos + Activo, Estrategia, Precio MKT, Strike, Prima, BE, Diagnostico, Retorno (%), Anualizado, POP
             st.caption("➕ Añade posiciones desde el panel **Añadir posición** en la barra lateral. Para ver **Gráfica de riesgo y editar**: elige la posición en el desplegable de abajo y pulsa **Ver Gráfica de riesgo y editar**. Orden: en riesgo primero.")
-            table_cols = ["Activo", "Estrategia", "Contratos", "Fecha inicio", "Fecha exp.", "Días posición", "Precio MKT", "Strike", "Prima recibida", "Breakeven", "Diagnostico", "Retorno", "Anualizado", "POP"]
+            table_cols = ["Activo", "Estrategia", "Contratos", "Acciones libres", "Fecha inicio", "Fecha exp.", "Días posición", "Precio MKT", "Strike", "Prima recibida", "Breakeven", "Diagnostico", "Retorno", "Anualizado", "POP"]
             df_show = df_dash[[c for c in table_cols if c in df_dash.columns]].copy()
             # Asegurar columnas numéricas para PyArrow (evitar ArrowInvalid al convertir '-' a int64)
             if "Días posición" in df_show.columns:
                 df_show["Días posición"] = pd.to_numeric(df_show["Días posición"], errors="coerce").fillna(0).astype(int)
             if "Contratos" in df_show.columns:
                 df_show["Contratos"] = pd.to_numeric(df_show["Contratos"], errors="coerce").fillna(0).astype(int)
+            if "Acciones libres" in df_show.columns:
+                df_show["Acciones libres"] = pd.to_numeric(df_show["Acciones libres"], errors="coerce").fillna(0).astype(int)
             def to_2dec(x):
                 if x is None: return "—"
                 if isinstance(x, (int, float)): return fmt2(x)
@@ -1067,9 +1071,8 @@ with tab_dash:
                                 st.caption("(Ya cerrado)")
 
                 st.markdown("---")
-                st.markdown("### Gráfica de riesgo")
+                st.markdown("### Análisis del riesgo (medidor)")
 
-                # ========== Gráfica de riesgo: P&L al vencimiento (Precio Acción vs Profit/Loss) ==========
                 def pnl_at_price(price_val):
                     if is_put:
                         return prems - (max(0, (strike or 0) - price_val) * 100 * contracts)
@@ -1077,7 +1080,6 @@ with tab_dash:
                 pnl_actual = pnl_at_price(mkt)
                 estado_texto = "Ganando" if pnl_actual >= 0 else "Perdiendo"
                 max_ganancia = prems
-                # CSP: max pérdida = prima - (strike*100*contratos) cuando S→0 (negativo). CC: ilimitado.
                 max_perdida_put = (prems - (strike or 0) * 100 * contracts) if is_put and strike else None
                 max_perdida_label = f"${fmt2(max_perdida_put)}" if is_put and max_perdida_put is not None else "Ilimitado"
 
@@ -1087,67 +1089,33 @@ with tab_dash:
                 st.markdown('<div class="rad-card">', unsafe_allow_html=True)
                 st.markdown(f"**{ticker} ({estrategia}) · {contracts} contrato(s)**")
 
-                # Gráfico P&L: Precio Acción ($) vs Ganancia/Pérdida ($) — como en la captura
-                strk = strike or (mkt * 0.9)
-                x_min = min(be, strk, mkt) * 0.7
-                x_max = max(be, strk, mkt) * 1.3
-                x_min = max(0.01, x_min)
-                S = np.linspace(x_min, x_max, 150)
-                if is_put:
-                    pnl_curve = prems - np.maximum(0, strk - S) * 100 * contracts
-                else:
-                    pnl_curve = prems - np.maximum(0, S - strk) * 100 * contracts
-
-                fig = go.Figure()
-                y_max = max(pnl_curve.max(), abs(pnl_curve.min()) * 0.3, 1)
-                y_min = min(pnl_curve.min(), -1)
-                # Zona de ganancia (verde arriba de cero)
-                fig.add_hrect(y0=0, y1=y_max, fillcolor="rgba(63,185,80,0.22)", line_width=0, layer="below", annotation_text="Zona de ganancia", annotation_position="top right")
-                # Zona de pérdida (rojo debajo de cero)
-                fig.add_hrect(y0=y_min, y1=0, fillcolor="rgba(248,81,73,0.35)", line_width=0, layer="below", annotation_text="Zona de pérdida", annotation_position="bottom right")
-                # Línea de payoff (azul/cyan)
-                fig.add_trace(go.Scatter(x=S, y=pnl_curve, mode="lines", name="P&L", line=dict(color="#00d2ff", width=3), fill="tozeroy", fillcolor="rgba(0,210,255,0.15)"))
-                # Línea cero
-                fig.add_hline(y=0, line_dash="dot", line_color="#8b949e", line_width=1.5)
-                # Línea vertical Strike (roja punteada)
-                if strike:
-                    fig.add_vline(x=strike, line_dash="dash", line_color="#ff4b4b", line_width=2, annotation_text=f" Strike ${fmt2(strike)} ", annotation_position="top", annotation_font_size=11, annotation_font_color="#ff4b4b")
-                # Línea vertical Breakeven (amarilla punteada)
-                fig.add_vline(x=be, line_dash="dash", line_color="#e3b341", line_width=2, annotation_text=f" BE ${fmt2(be)} ", annotation_position="bottom", annotation_font_size=11, annotation_font_color="#e3b341")
-                # Línea vertical Precio actual (blanca/azul sólida)
-                fig.add_vline(x=mkt, line_dash="solid", line_color="#e6edf3", line_width=2.5, annotation_text=f" Precio ${fmt2(mkt)} ", annotation_position="top", annotation_font_size=12, annotation_font_color="#e6edf3")
-
-                fig.update_layout(
-                    template="plotly_dark",
-                    height=380,
-                    margin=dict(l=65, r=45, t=55, b=55),
-                    xaxis_title="Precio Acción ($)",
-                    yaxis_title="Ganancia/Pérdida ($)",
-                    font=dict(size=12),
-                    showlegend=False,
-                    plot_bgcolor="rgba(13,17,23,0.98)",
-                    paper_bgcolor="rgba(22,27,34,0.98)",
-                    xaxis=dict(showgrid=True, gridcolor="rgba(48,54,61,0.4)", zeroline=False),
-                    yaxis=dict(showgrid=True, gridcolor="rgba(48,54,61,0.4)", zeroline=False)
+                from app.position_chart_utils import risk_analysis_score, build_gauge_price_axis, build_copyable_summary_position
+                health_main = risk_analysis_score(pnl_actual, mkt, be, is_put, dte, 0, True)
+                status_main = "Favorable" if health_main > 66 else ("Evaluar" if health_main > 33 else "Desfavorable")
+                fig_gauge_main = build_gauge_price_axis(
+                    strike or 0, be, mkt, dte, status_main,
+                    title="Análisis del riesgo",
+                    is_put=is_put,
                 )
-                st.plotly_chart(fig, use_container_width=True)
-                legend_items = ["<span style='color:#00d2ff; font-weight:bold'>——</span> Curva P&L", "<span style='color:#ff4b4b; font-weight:bold'>— —</span> Strike", "<span style='color:#e3b341; font-weight:bold'>— —</span> BE", "<span style='color:#e6edf3; font-weight:bold'>——</span> Precio actual"]
-                st.markdown(f"<div style='display:flex; flex-wrap:wrap; gap:1rem; margin-top:8px; margin-bottom:12px; font-size:0.85rem; color:#8b949e;'>{' · '.join(legend_items)}</div>", unsafe_allow_html=True)
-                st.caption("Gráfica de riesgo: P&L al vencimiento según precio del subyacente. Zona verde = ganancia, zona roja = pérdida.")
+                st.plotly_chart(fig_gauge_main, use_container_width=True)
 
-                # Métricas resumidas
                 st.markdown(f"""
                 <div class="rad-metrics rad-metrics-grid">
-                    <div class="rad-metric"><span class="k">Precio</span><span class="v">${fmt2(mkt)}</span></div>
-                    <div class="rad-metric"><span class="k">Strike</span><span class="v">${fmt2(strike)}</span></div>
-                    <div class="rad-metric"><span class="k">BE</span><span class="v">${fmt2(be)}</span></div>
-                    <div class="rad-metric"><span class="k">DTE</span><span class="v">{dte} días</span></div>
-                    <div class="rad-metric"><span class="k">P&L actual</span><span class="v">${fmt2(pnl_actual)}</span></div>
-                    <div class="rad-metric"><span class="k">Max ganancia</span><span class="v" style="color:#3fb950">${fmt2(max_ganancia)}</span></div>
-                    <div class="rad-metric"><span class="k">Max pérdida</span><span class="v" style="color:#f85149">{max_perdida_label}</span></div>
+                    <div class="rad-metric"><span class="k">Cumplimiento</span><span class="v">{health_main}%</span></div>
+                    <div class="rad-metric"><span class="k">Precio (actual)</span><span class="v">${fmt2(mkt)}</span></div>
+                    <div class="rad-metric"><span class="k">Strike (ejercicio)</span><span class="v">${fmt2(strike)}</span></div>
+                    <div class="rad-metric"><span class="k">BE (breakeven)</span><span class="v">${fmt2(be)}</span></div>
+                    <div class="rad-metric"><span class="k">DTE (días a venc.)</span><span class="v">{dte} días</span></div>
+                    <div class="rad-metric"><span class="k">P&L actual ($)</span><span class="v">${fmt2(pnl_actual)}</span></div>
+                    <div class="rad-metric"><span class="k">Max ganancia ($)</span><span class="v" style="color:#3fb950">${fmt2(max_ganancia)}</span></div>
+                    <div class="rad-metric"><span class="k">Max pérdida ($)</span><span class="v" style="color:#f85149">{max_perdida_label}</span></div>
                     <div class="rad-metric {'ok' if diagnostico == 'OK' else 'risk'}"><span class="k">Estado</span><span class="v">{estado_texto} · {diagnostico}</span></div>
                 </div>
                 """, unsafe_allow_html=True)
+                with st.expander("📋 Copiar / Compartir resumen de la posición", expanded=False):
+                    copy_text_main = build_copyable_summary_position(ticker, estrategia, contracts, strike or 0, be, mkt, prems, dte, pnl_actual, max_ganancia, max_perdida_label, estado_texto, diagnostico)
+                    st.text_area("Resumen (selecciona y copia)", value=copy_text_main, height=160, key="copy_main_pos", disabled=True, label_visibility="collapsed")
+                    st.caption("Selecciona todo el texto y cópialo para compartir (móvil: mantén pulsado).")
                 st.markdown('</div>', unsafe_allow_html=True)
 
 with tab_report:
