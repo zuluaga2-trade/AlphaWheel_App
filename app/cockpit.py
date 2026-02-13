@@ -171,13 +171,13 @@ Tienes acciones (por compra directa o por asignación de un CSP). Vendes un call
         st.markdown("""
 1. **Mi cuenta** (pestaña): crea una cuenta con un nombre (ej. "Cuenta principal"). Define **capital ($)**, **meta anual (%)** y **máx. por ticker (%)**.
 2. **Token Tradier**: en Mi cuenta, pega tu **token de Tradier** (obtienes uno en tradier.com → API Access). Con eso la app puede mostrar precios en tiempo real y estado de las posiciones.
-3. **Alpha Vantage** (opcional): si quieres filtros por earnings o datos fundamentales en el screener, añade tu clave en la barra lateral del Screener y en Mi cuenta.
+3. **Alpha Vantage** (opcional): si quieres filtros por earnings o datos fundamentales en el screener, añade tu clave en **Filtros del Screener** (arriba) y en Mi cuenta.
 4. Selecciona la cuenta en el desplegable superior para ver su dashboard.
         """)
 
     with st.expander("🔎 El Screener: buscar oportunidades", expanded=False):
         st.markdown("""
-El **Screener** es la vista "🔎 Screener" (selector arriba). En la **barra lateral**:
+El **Screener** es la vista "🔎 Screener" (selector arriba). En los **Filtros del Screener** (arriba):
 
 - **Estrategia**: CSP o Covered Call.
 - **DTE mínimo / máximo**: rango de días hasta vencimiento (ej. 7–30).
@@ -190,7 +190,7 @@ El **Screener** es la vista "🔎 Screener" (selector arriba). En la **barra lat
 
 Pulsa **🚀 Iniciar barrido**. La tabla muestra resultados (ticker, expiración, DTE, precio, strike, prima, retorno, delta, earnings, etc.). **Earnings**: NO = verde (sin earnings en periodo), SÍ = rojo.
 
-- **Analizar un contrato (Thinkorswim)**: en la barra lateral, pega un símbolo tipo `.NOW260227P105` o `.NOW260227C108` y pulsa **Analizar contrato**. Verás la misma ficha (métricas, riesgos SMA200/Stoch/Earnings, medidor de Análisis del riesgo).
+- **Analizar un contrato (Thinkorswim)**: en los **Filtros del Screener** (arriba), pega un símbolo tipo `.NOW260227P105` o `.NOW260227C108` y pulsa **Analizar contrato**. Verás la misma ficha (métricas, riesgos SMA200/Stoch/Earnings, medidor de Análisis del riesgo).
 - **Ficha al hacer clic**: selecciona una fila en la tabla para ver la **Ficha Sniper** (métricas, volatilidad, medidor de Análisis del riesgo, métricas resumidas). Desde ahí puedes **copiar/compartir** el resumen del contrato y abrir un trade con el expander "Abrir trade desde esta ficha".
         """)
 
@@ -906,7 +906,7 @@ def render_screener_page(user_id: int) -> None:
     df = st.session_state.get("screener_res")
     if df is None or df.empty:
         st.markdown("### 🔎 Screener")
-        st.caption("Usa el botón **Iniciar barrido** en la barra lateral para ejecutar el escaneo. Los resultados aparecerán aquí.")
+        st.caption("Usa el botón **Iniciar barrido** en **Filtros del Screener** (arriba) para ejecutar el escaneo. Los resultados aparecerán aquí.")
         return
 
     st.markdown("### 📊 Dashboard de resultados")
@@ -1170,6 +1170,10 @@ def run():
     if not user_id:
         st.warning("Sesión no válida. Vuelve a iniciar sesión.")
         return
+
+    # En web/móvil el sidebar puede no verse: vista por defecto Mi Cuenta para no dejar atrapado al usuario
+    if "main_view_radio" not in st.session_state:
+        st.session_state["main_view_radio"] = "📊 Mi Cuenta"
 
     with st.sidebar:
         st.header("🦅 Alpha Control")

@@ -846,7 +846,7 @@ with tab_dash:
             # --- Posiciones abiertas ---
             st.markdown('<div class="dashboard-card"><h3>Posiciones abiertas</h3>', unsafe_allow_html=True)
             # Tabla: Fecha inicio, Fecha exp., Contratos + Activo, Estrategia, Precio MKT, Strike, Prima, BE, Diagnostico, Retorno (%), Anualizado, POP
-            st.caption("➕ Añade posiciones desde el panel **Añadir posición** en la barra lateral. Para ver **Gráfica de riesgo y editar**: elige la posición en el desplegable de abajo y pulsa **Ver Gráfica de riesgo y editar**. Orden: en riesgo primero.")
+            st.caption("➕ Añade posiciones desde el panel **Añadir posición** (arriba). Para ver **Gráfica de riesgo y editar**: elige la posición en el desplegable de abajo y pulsa **Ver Gráfica de riesgo y editar**. Orden: en riesgo primero.")
             table_cols = ["Activo", "Estrategia", "Contratos", "Acciones libres", "Fecha inicio", "Fecha exp.", "Días posición", "Precio MKT", "Strike", "Prima recibida", "Breakeven", "Diagnostico", "Retorno", "Anualizado", "POP"]
             df_show = df_dash[[c for c in table_cols if c in df_dash.columns]].copy()
             # Asegurar columnas numéricas para PyArrow (evitar ArrowInvalid al convertir '-' a int64)

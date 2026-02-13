@@ -268,7 +268,7 @@ PROFESSIONAL_CSS = """
         color: #c9d1d9 !important;
     }
     .stApp > header { background: linear-gradient(90deg, #0d1117 0%, #161b22 100%); border-bottom: 1px solid #21262d; }
-    /* Ocultar solo pie de Streamlit; el header debe quedar visible para que se vea el botón que abre la barra lateral */
+    /* Ocultar solo pie de Streamlit; el header debe quedar visible para el menú */
     footer { visibility: hidden !important; }
     div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; border: 1px solid #21262d; }
     /* Login: tarjeta centrada */
