@@ -516,6 +516,7 @@ def set_account_connection_status(account_id: int, status: str):
         conn.close()
 
 def create_account(user_id: int, name: str, cap_total: float = 100000.0, target_ann: float = 20.0, max_per_ticker: float = 10.0):
+    """Crea una cuenta. Devuelve account_id o None si ya existe una cuenta con ese nombre (UniqueViolation)."""
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -524,6 +525,12 @@ def create_account(user_id: int, name: str, cap_total: float = 100000.0, target_
         )
         conn.commit()
         return cur.lastrowid
+    except sqlite3.IntegrityError:
+        return None
+    except Exception as e:
+        if pg_IntegrityError and isinstance(e, pg_IntegrityError):
+            return None
+        raise
     finally:
         conn.close()
 

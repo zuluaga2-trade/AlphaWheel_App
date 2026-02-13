@@ -1295,9 +1295,14 @@ with tab_settings:
     new_name = st.text_input("Nombre cuenta (ej. Estrategia Rueda, IRA Principal)", key="new_acc_name")
     if st.button("Crear cuenta"):
         if new_name:
-            db.create_account(user_id, new_name.strip())
-            if "new_acc_name" in st.session_state:
-                del st.session_state["new_acc_name"]
-            st.success("Cuenta creada. Selecciónala en el sidebar.")
-            st.rerun()
+            acc_id = db.create_account(user_id, new_name.strip())
+            if acc_id:
+                if "new_acc_name" in st.session_state:
+                    del st.session_state["new_acc_name"]
+                st.success("Cuenta creada. Selecciónala arriba.")
+                st.rerun()
+            else:
+                st.error("Ya existe una cuenta con ese nombre. Elige otro.")
+        else:
+            st.warning("Escribe un nombre para la cuenta.")
     st.markdown('</div>', unsafe_allow_html=True)  # dashboard-card Mi cuenta
