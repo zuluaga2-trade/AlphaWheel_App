@@ -80,6 +80,11 @@ class _PgConnWrapper:
     def __init__(self, conn):
         self._conn = conn
 
+    @property
+    def raw_conn(self):
+        """Conexión psycopg2 subyacente (para autocommit en esquema)."""
+        return self._conn
+
     def execute(self, sql, params=None):
         sql = sql.replace("?", "%s")
         sql = _pg_quote_user_table(sql)
@@ -120,10 +125,18 @@ def _run_pg_schema(conn):
     # Quitar líneas que son solo comentarios o vacías, para que el split por ";" no deje el primer CREATE en un bloque que empiece con "--"
     lines = [ln for ln in sql.splitlines() if ln.strip() and not ln.strip().startswith("--")]
     sql_clean = "\n".join(lines)
-    for stmt in sql_clean.split(";"):
-        stmt = stmt.strip()
-        if stmt:
-            conn.execute(stmt)
+    # Cada sentencia en su propia transacción para evitar InFailedSqlTransaction si una falla
+    raw = getattr(conn, "raw_conn", conn)
+    if hasattr(raw, "autocommit"):
+        raw.autocommit = True
+    try:
+        for stmt in sql_clean.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(stmt)
+    finally:
+        if hasattr(raw, "autocommit"):
+            raw.autocommit = False
     conn.commit()
 
 
