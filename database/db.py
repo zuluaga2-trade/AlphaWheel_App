@@ -56,11 +56,20 @@ class _PgCursorWrapper:
     def rowcount(self):
         return self._cur.rowcount
 
+    @property
+    def description(self):
+        return getattr(self._cur, "description", None)
+
     def fetchone(self):
+        # Evitar ProgrammingError "no results to fetch": solo fetch si el cursor tiene result set
+        if getattr(self._cur, "description", None) is None:
+            return None
         row = self._cur.fetchone()
         return dict(row) if row else None
 
     def fetchall(self):
+        if getattr(self._cur, "description", None) is None:
+            return []
         return [dict(r) for r in self._cur.fetchall()]
 
 
@@ -252,6 +261,19 @@ def ensure_user(email: str, display_name: str = None):
 
 def get_user_by_email(email: str):
     """Obtiene usuario por email (para login)."""
+    if _is_postgres():
+        # Ruta directa con psycopg2 para evitar ProgrammingError en fetchone con el wrapper
+        conn = psycopg2.connect(config.DATABASE_URL)
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                'SELECT user_id, email, display_name, password_hash FROM "User" WHERE email = %s',
+                (email.strip().lower(),),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
