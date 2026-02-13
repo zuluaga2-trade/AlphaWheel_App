@@ -86,6 +86,37 @@ Guarda y haz clic en **"Deploy!"**.
 - Puedes compartir ese enlace solo con los tres usuarios; ellos se registran con su email (y contraseña) y ya pueden usar la app.
 - Para cambiar la lista de emails más adelante: en [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets** → edita `ALPHAWHEEL_ALLOWED_EMAILS` y guarda (la app se redesplegará).
 
+### 2.5 Redeploy manual (cuando los cambios no se ven en la app)
+
+Si hiciste `git push` pero la app en `alphawheel.streamlit.app` sigue mostrando la versión antigua, fuerza un **reboot** para que Streamlit Cloud reconstruya con el último código:
+
+**Opción A — Desde la propia app**
+
+1. Abre tu app: **https://alphawheel.streamlit.app**
+2. En la esquina **inferior derecha** haz clic en **"Manage app"** (o el botón con la flecha).
+3. Se abre el panel de gestión. Haz clic en el menú de **tres puntos** (⋮) y elige **"Reboot app"**.
+4. Confirma con **"Reboot"**. La app mostrará "Your app is in the oven" unos minutos y volverá con el código actualizado.
+
+**Opción B — Desde el workspace de Streamlit**
+
+1. Entra en **[share.streamlit.io](https://share.streamlit.io)** e inicia sesión.
+2. En la lista de apps, localiza **AlphaWheel Pro** (o el nombre de tu app).
+3. Haz clic en el **menú de tres puntos** (⋮) al lado de la app y elige **"Reboot"**.
+4. Confirma con **"Reboot"**.
+
+**Si sigue sin actualizarse:** en [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → comprueba que **Branch** sea `main` y **Main file path** sea `app/Home.py`. Revisa también que el último commit esté en GitHub (repo `zuluaga2-trade/AlphaWheel_App`).
+
+### 2.6 Error "UndefinedTable" o "tabla User no existe" (PostgreSQL)
+
+Si al hacer login ves `psycopg2.errors.UndefinedTable` (tabla `User` no existe), la app está usando **PostgreSQL** pero las tablas aún no se han creado. Para que funcionen login y datos en la nube:
+
+1. **Configura la base PostgreSQL en Secrets** (Neon, Supabase u otro): en [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**, añade la URL de PostgreSQL (ver sección 5 más abajo):
+   ```toml
+   ALPHAWHEEL_DATABASE_URL = "postgresql://usuario:contraseña@host:5432/nombre_bd?sslmode=require"
+   ```
+2. **Reinicia la app** (Reboot, ver 2.5). Al arrancar, la app ejecuta el esquema `schema_pg.sql` y crea las tablas (`User`, `Account`, `Trade`, etc.) automáticamente.
+3. Si tras el reboot sigue el error, revisa en **Manage app** → **Logs** el mensaje exacto (por ejemplo "Esquema PostgreSQL no encontrado" o errores de permisos en la BD).
+
 ---
 
 ## 3. Probar en local con la misma restricción (opcional)

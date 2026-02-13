@@ -8,7 +8,20 @@ from pathlib import Path
 # Si DATABASE_URL está definido, se usa PostgreSQL; si no, se usa SQLite en DB_PATH.
 _root = Path(__file__).resolve().parent
 DB_PATH = os.environ.get("ALPHAWHEEL_DB_PATH", str(_root / "trading_app.db"))
-DATABASE_URL = os.environ.get("ALPHAWHEEL_DATABASE_URL", "").strip()
+
+
+def _get_database_url():
+    url = os.environ.get("ALPHAWHEEL_DATABASE_URL", "").strip() or os.environ.get("DATABASE_URL", "").strip()
+    if url:
+        return url
+    try:
+        import streamlit as st
+        return (st.secrets.get("ALPHAWHEEL_DATABASE_URL") or st.secrets.get("DATABASE_URL") or "").strip()
+    except Exception:
+        return ""
+
+
+DATABASE_URL = _get_database_url()
 
 # Restricción por email: solo estos usuarios pueden acceder (login y registro).
 # Variable de entorno ALPHAWHEEL_ALLOWED_EMAILS = emails separados por coma (ej. user1@mail.com,user2@mail.com).

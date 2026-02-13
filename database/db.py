@@ -23,10 +23,17 @@ def _is_postgres():
 
 
 def _schema_path(name="schema.sql"):
-    p = Path(__file__).parent / name
-    if p.exists():
-        return p
-    return Path(__file__).parent.parent / "database" / name
+    """Ruta al archivo de esquema; prueba varias ubicaciones para Cloud (mount path)."""
+    candidates = [
+        Path(__file__).resolve().parent / name,
+        Path(__file__).resolve().parent.parent / "database" / name,
+        Path.cwd() / "database" / name,
+        Path.cwd() / name,
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return Path(__file__).resolve().parent / name
 
 
 # --- Wrapper para PostgreSQL (misma API que SQLite: ? -> %s, lastrowid vía lastval()) ---
@@ -106,15 +113,14 @@ def get_conn():
 def _run_pg_schema(conn):
     path = _schema_path("schema_pg.sql")
     if not path.exists():
-        return
+        raise FileNotFoundError(
+            f"Esquema PostgreSQL no encontrado: schema_pg.sql. Probadas: {[str(p) for p in [Path(__file__).resolve().parent, Path.cwd() / 'database']]}"
+        )
     sql = path.read_text(encoding="utf-8")
     for stmt in sql.split(";"):
         stmt = stmt.strip()
         if stmt and not stmt.startswith("--"):
-            try:
-                conn.execute(stmt)
-            except Exception:
-                pass
+            conn.execute(stmt)
     conn.commit()
 
 
