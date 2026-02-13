@@ -1,5 +1,7 @@
 # AlphaWheel Pro - Acceso a BD con aislamiento por user_id / account_id
 # Soporta SQLite (local) y PostgreSQL (nube, para no perder datos en redeploys)
+# Paridad web/local: las rutas críticas (login, cuentas, trades, guardar CSP) usan conexión
+# directa psycopg2 cuando _is_postgres() para evitar fallos del wrapper en la versión web.
 import sqlite3
 import os
 from pathlib import Path
@@ -492,6 +494,19 @@ def get_accounts_by_user(user_id: int):
 
 def get_account_by_id(account_id: int, user_id: int):
     """Una cuenta por ID, solo si pertenece al user_id."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM Account WHERE account_id = %s AND user_id = %s",
+                (account_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -600,6 +615,19 @@ def delete_account(account_id: int, user_id: int) -> bool:
 # --- Trades (siempre por account_id; la cuenta ya está ligada al user) ---
 def get_trade_by_id(account_id: int, trade_id: int):
     """Un trade por ID, solo si pertenece a la cuenta."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM Trade WHERE account_id = %s AND trade_id = %s",
+                (account_id, trade_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -614,6 +642,25 @@ def get_trade_by_id(account_id: int, trade_id: int):
 
 def get_trades_by_account(account_id: int, status: str = None, ticker: str = None):
     """Trades de la cuenta. Opcional: filtrar por status y/o ticker."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            q = "SELECT * FROM Trade WHERE account_id = %s"
+            params = [account_id]
+            if status:
+                q += " AND status = %s"
+                params.append(status)
+            if ticker:
+                q += " AND ticker = %s"
+                params.append(ticker)
+            q += " ORDER BY trade_date DESC, trade_id DESC"
+            cur.execute(q, params)
+            rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         q = "SELECT * FROM Trade WHERE account_id = ?"
@@ -634,6 +681,23 @@ def insert_trade(account_id: int, ticker: str, asset_type: str, quantity: int, p
                 strategy_type: str, status: str, entry_type: str, trade_date: str,
                 strike: float = None, expiration_date: str = None, closed_date: str = None,
                 parent_trade_id: int = None, comment: str = None):
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                """INSERT INTO Trade (account_id, ticker, asset_type, quantity, price, strike, expiration_date,
+                 strategy_type, status, entry_type, trade_date, closed_date, parent_trade_id, comment)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 RETURNING trade_id""",
+                (account_id, ticker, asset_type, quantity, price, strike, expiration_date,
+                 strategy_type, status, entry_type, trade_date, closed_date, parent_trade_id, comment),
+            )
+            row = cur.fetchone()
+            return row["trade_id"] if row else None
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
