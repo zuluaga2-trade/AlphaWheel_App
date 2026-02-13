@@ -463,6 +463,18 @@ def delete_bunker(bunker_id: int, user_id: int) -> bool:
 # --- Cuentas (siempre filtradas por user_id) ---
 def get_accounts_by_user(user_id: int):
     """Cuentas del usuario. Los datos de otro usuario nunca se exponen."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM Account WHERE user_id = %s ORDER BY name",
+                (user_id,),
+            )
+            rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
