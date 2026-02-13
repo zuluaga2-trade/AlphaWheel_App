@@ -1432,6 +1432,7 @@ def run():
     tab_dash, tab_tutorial, tab_report, tab_settings = st.tabs(
         ["📊 Dashboard", "📖 Tutorial", "📑 Reportes", "👤 Mi cuenta"]
     )
+    st.caption("Para configurar **token Tradier**, capital y meta anual: abre la pestaña **👤 Mi cuenta**.")
 
     with tab_tutorial:
         _render_tutorial_tab()
@@ -2052,8 +2053,12 @@ def run():
                 st.dataframe(prev_df[["Fecha", "Ticker", "Estrategia", "Cant.", "Prima", "Strike", "Expiración", "Estado"]], use_container_width=True, height=220)
             else:
                 st.info("No hay trades en este rango.")
-            tax = tax_efficiency_summary(account_id, date_from_s, date_to_s)
-            st.json({"Total realizado": tax["total_realized_gain_loss"], "Trades cerrados": tax["closed_trades_count"], "Por ticker": tax["by_ticker"]})
+            try:
+                tax = tax_efficiency_summary(account_id, date_from_s, date_to_s)
+                st.json({"Total realizado": tax["total_realized_gain_loss"], "Trades cerrados": tax["closed_trades_count"], "Por ticker": tax["by_ticker"]})
+            except Exception as e:
+                st.warning("No se pudo cargar el resumen Tax Efficiency. Revisa los logs si persiste.")
+                st.json({"Total realizado": 0, "Trades cerrados": 0, "Por ticker": {}})
             col1, col2, col3 = st.columns(3)
             csv_data = export_trades_csv(account_id, date_from_s, date_to_s, account_name)
             if csv_data:

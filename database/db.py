@@ -98,8 +98,12 @@ class _PgConnWrapper:
         sql = sql.replace("?", "%s")
         sql = _pg_quote_user_table(sql)
         cur = self._conn.cursor(cursor_factory=pg_extras.RealDictCursor)
-        cur.execute(sql, params or ())
-        return _PgCursorWrapper(cur)
+        try:
+            cur.execute(sql, params or ())
+            return _PgCursorWrapper(cur)
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def commit(self):
         self._conn.commit()
@@ -118,6 +122,7 @@ def get_conn():
     """Conexión a SQLite o PostgreSQL según config. Misma API: conn.execute(sql, params), cur.lastrowid, cur.fetchone() (dict)."""
     if _is_postgres():
         conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True  # Evita InFailedSqlTransaction: cada sentencia es su propia transacción
         return _PgConnWrapper(conn)
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
