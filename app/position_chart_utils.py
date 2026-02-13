@@ -284,8 +284,8 @@ def build_gauge_price_axis(
                 "bordercolor": "#30363d",
                 "steps": steps_zones,
                 "threshold": {
-                    "line": {"color": bar_color, "width": 2},
-                    "thickness": 0.5,
+                    "line": {"color": "rgba(0,0,0,0)", "width": 0},
+                    "thickness": 0,
                     "value": pos_precio,
                 },
             },
@@ -293,8 +293,8 @@ def build_gauge_price_axis(
     )
 
     cx, cy = 0.5, 0.14
-    r_inner = 0.17
-    r_outer = 0.34
+    r_inner = 0.17   # Origen de las agujas (no en el centro para no tapar el DTE)
+    r_outer = 0.34   # Punta: misma longitud para Strike, BE y Precio
 
     def angle_rad(pos: float) -> float:
         return math.pi * (1.0 - pos / 100.0)
@@ -310,35 +310,27 @@ def build_gauge_price_axis(
     color_strike = "#ff9f43"
     color_be = "#dfe6e9"
     color_precio = "#00d2d3"
-    line_w = 1.2
+    line_w = 2.5  # Mismo grosor para las tres agujas (Strike, BE, Precio)
 
     shapes: list[dict] = []
+    tips: list[tuple[float, float]] = []
 
-    x0_1, y0_1, x1_1, y1_1 = needle_segment(pos_strike)
-    shapes.append({"type": "line", "xref": "paper", "yref": "paper",
-        "x0": x0_1, "y0": y0_1, "x1": x1_1, "y1": y1_1,
-        "line": {"color": color_strike, "width": line_w}})
-    x0_2, y0_2, x1_2, y1_2 = needle_segment(pos_be)
-    shapes.append({"type": "line", "xref": "paper", "yref": "paper",
-        "x0": x0_2, "y0": y0_2, "x1": x1_2, "y1": y1_2,
-        "line": {"color": color_be, "width": line_w}})
-    x0_3, y0_3, x1_3, y1_3 = needle_segment(pos_precio)
-    shapes.append({"type": "line", "xref": "paper", "yref": "paper",
-        "x0": x0_3, "y0": y0_3, "x1": x1_3, "y1": y1_3,
-        "line": {"color": color_precio, "width": line_w}})
-    shapes.append({
-        "type": "circle", "xref": "paper", "yref": "paper",
-        "x0": x1_3 - 0.01, "y0": y1_3 - 0.01, "x1": x1_3 + 0.01, "y1": y1_3 + 0.01,
-        "line": {"color": color_precio, "width": 1}, "fillcolor": color_precio,
-    })
+    # Las tres agujas iguales en todos los gráficos: mismo origen, misma longitud, sin círculos
+    for pos, color in [(pos_strike, color_strike), (pos_be, color_be), (pos_precio, color_precio)]:
+        x0, y0, x1, y1 = needle_segment(pos)
+        tips.append((x1, y1))
+        shapes.append({"type": "line", "xref": "paper", "yref": "paper",
+            "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+            "line": {"color": color, "width": line_w}})
 
     def label_pos(x1: float, y1: float, k: float = 1.12) -> tuple[float, float]:
         dx, dy = x1 - cx, y1 - cy
         return (cx + k * dx, cy + k * dy)
 
-    lx1, ly1 = label_pos(x1_1, y1_1)
-    lx2, ly2 = label_pos(x1_2, y1_2)
-    lx3, ly3 = label_pos(x1_3, y1_3)
+    # tips orden: Strike, BE, Precio
+    lx1, ly1 = label_pos(tips[0][0], tips[0][1])   # Strike
+    lx2, ly2 = label_pos(tips[1][0], tips[1][1])   # BE
+    lx3, ly3 = label_pos(tips[2][0], tips[2][1])   # Precio
 
     annotations: list[dict] = [
         {"text": "Strike", "xref": "paper", "yref": "paper", "x": lx1, "y": ly1,

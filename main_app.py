@@ -34,13 +34,19 @@ from business.wheel import (
     get_stock_quantity,
 )
 from reports.bitacora import export_trades_csv, export_trades_excel, export_trades_pdf, tax_efficiency_summary, get_trades_for_report
-from app.cockpit import render_screener_page, _render_tutorial_tab
+from app.cockpit import render_screener_page, _render_screener_sidebar_form, _render_tutorial_tab
 import config
 
 # Inicializar BD al arranque
 init_db()
 
-st.set_page_config(page_title="AlphaWheel Pro", layout="wide", page_icon="🦅")
+st.set_page_config(
+    page_title="AlphaWheel Pro",
+    layout="wide",
+    page_icon="🦅",
+    initial_sidebar_state="expanded",
+    menu_items={"Get help": None, "Report a Bug": None, "About": None},
+)
 
 # --- Regla: cifras con 2 decimales y coma como separador de miles ---
 def fmt2(val):
@@ -244,10 +250,17 @@ with st.sidebar:
     main_view = st.radio("Ir a", ["🔎 Screener", "📊 Mi Cuenta"], key="main_view_radio_m", horizontal=True)
     show_screener_page = main_view == "🔎 Screener"
 
+    run_scan = False
     account_id = None
     acc_data = {}
     token = ""
-    if not show_screener_page:
+    if show_screener_page:
+        st.caption("**Filtros del Screener** — Configura y pulsa **Iniciar barrido**.")
+        try:
+            run_scan = _render_screener_sidebar_form(user_id)
+        except Exception as e:
+            st.error(f"Error al cargar filtros: {e}")
+    else:
         accounts = get_accounts_by_user(user_id) if user_id else []
         if not accounts:
             st.warning("Sin cuentas. Ve a la pestaña **Mi cuenta** para crear una.")
@@ -500,7 +513,7 @@ with st.sidebar:
 
 # --- Vista Screener (por usuario) o tabs de cuenta ---
 if show_screener_page:
-    render_screener_page(user_id)
+    render_screener_page(user_id, run_scan)
     st.stop()
 
 tab_dash, tab_tutorial, tab_report, tab_settings = st.tabs(

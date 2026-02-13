@@ -227,37 +227,29 @@ En la pestaña **📑 Reportes**:
     st.caption("¿Dudas? Revisa cada sección desplegable según lo que quieras hacer: buscar opciones, registrar una posición o ver el riesgo de una operación.")
 
 
-def render_screener_page(user_id: int) -> None:
-    """
-    Screener por usuario: filtros y acciones en el contenido principal (web y móvil sin depender del sidebar).
-    """
-    token, env = _get_tradier_token_for_user(user_id)
-    api_tradier = "https://api.tradier.com/v1/" if (env or "sandbox") == "prod" else "https://sandbox.tradier.com/v1/"
-    headers_tradier = {"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"} if token else {}
+def _render_screener_sidebar_form(user_id: int) -> bool:
+    """Renderiza el formulario del Screener en la barra lateral. Devuelve True si se pulsó Iniciar barrido."""
     settings = get_user_screener_settings(user_id) if user_id else {}
     saved_av = (settings.get("av_api_key") or "").strip()
     bunkers = get_user_bunkers(user_id) if user_id else []
-
-    # ---------- Filtros del Screener en el contenido principal (funciona en web y móvil) ----------
-    with st.expander("🔎 Filtros del Screener", expanded=True):
+    # Contenedor explícito para que Streamlit siempre pinte el formulario en el sidebar
+    with st.container():
         estrategia = st.radio("Estrategia", ["Cash Secured Put (CSP)", "Covered Call (CC)"], horizontal=True, key="scr_estrategia")
-        st.caption("DTE: días hasta vencimiento. Delta: rango objetivo (CSP típ. -0.35 a -0.10, CC 0.10 a 0.35).")
+        st.caption("DTE / Delta / ROI. Colateral: 0 = sin filtro.")
         col_dte1, col_dte2 = st.columns(2)
         with col_dte1:
-            dte_min = st.number_input("DTE mínimo (días)", min_value=0, max_value=365, value=7, step=1, key="scr_dte_min")
+            st.number_input("DTE mín (días)", min_value=0, max_value=365, value=7, step=1, key="scr_dte_min")
         with col_dte2:
-            dte_max = st.number_input("DTE máximo (días)", min_value=0, max_value=365, value=30, step=1, key="scr_dte_max")
-        dte_r = (min(dte_min, dte_max), max(dte_min, dte_max))
+            st.number_input("DTE máx (días)", min_value=0, max_value=365, value=30, step=1, key="scr_dte_max")
         delta_default_lo = -0.20 if estrategia == "Cash Secured Put (CSP)" else 0.10
         delta_default_hi = -0.10 if estrategia == "Cash Secured Put (CSP)" else 0.20
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
-            delta_lo = st.number_input("Delta mínimo", min_value=-0.50, max_value=0.50, value=float(delta_default_lo), step=0.05, format="%.2f", key="scr_delta_lo")
+            st.number_input("Delta mín", min_value=-0.50, max_value=0.50, value=float(delta_default_lo), step=0.05, format="%.2f", key="scr_delta_lo")
         with col_dl2:
-            delta_hi = st.number_input("Delta máximo", min_value=-0.50, max_value=0.50, value=float(delta_default_hi), step=0.05, format="%.2f", key="scr_delta_hi")
-        delta_r = (min(delta_lo, delta_hi), max(delta_lo, delta_hi))
-        roi_min_f = st.number_input("ROI anualizado mínimo (%)", value=20.0, step=1.0, key="scr_roi")
-        colateral_disponible = st.number_input("Colateral disponible ($)", value=10000.0, min_value=0.0, step=1000.0, format="%.0f", key="scr_colateral", help="0 = sin filtro. Solo opciones con colateral ≤ este valor.")
+            st.number_input("Delta máx", min_value=-0.50, max_value=0.50, value=float(delta_default_hi), step=0.05, format="%.2f", key="scr_delta_hi")
+        st.number_input("ROI mín (%)", value=20.0, step=1.0, key="scr_roi")
+        st.number_input("Colateral ($)", value=10000.0, min_value=0.0, step=1000.0, format="%.0f", key="scr_colateral")
         st.markdown("---")
         av_key = st.text_input("Alpha Vantage Key", value=saved_av, type="password", placeholder="API key", key="screener_av_key")
         if st.button("Verificar y guardar clave", key="scr_av_btn"):
@@ -281,73 +273,66 @@ def render_screener_page(user_id: int) -> None:
                     st.error(f"Error: {e}")
             else:
                 st.warning("Escribe la clave y guarda.")
-        f_sma = st.checkbox("Strikes bajo SMA 200", value=False, key="scr_sma")
-        f_stoch = st.checkbox("Stoch < 30", value=False, key="scr_stoch")
-        f_earnings = st.checkbox("Evitar earnings", value=False, key="scr_earn")
-
+        st.checkbox("Strikes bajo SMA 200", value=False, key="scr_sma")
+        st.checkbox("Stoch < 30", value=False, key="scr_stoch")
+        st.checkbox("Evitar earnings", value=False, key="scr_earn")
+        st.markdown("---")
+        st.caption("**Origen del barrido**")
+        origen_sel = st.selectbox(
+            "Escaneo por",
+            ["🎯 Ticker individual", "🏗️ Búnker (lista de tickers)"],
+            key="origen_escaneo",
+            help="Ticker individual: un solo símbolo. Búnker: lista de tickers que creas abajo.",
+        )
         bunker_options = [(b["bunker_id"], f"{b['name']} ({len([x for x in (b.get('tickers_text') or '').split(',') if x.strip()])} tickers)") for b in bunkers]
-        if not bunker_options:
-            selected_bunker_id = None
-            st.caption("Sin búnkeres. Crea uno en **Gestionar búnkers** (abajo).")
+        if origen_sel == "🎯 Ticker individual" or estrategia == "Covered Call (CC)":
+            st.text_input("Ticker a escanear", value=st.session_state.get("single_ticker", "NVDA"), placeholder="Ej. NVDA, AAPL", key="single_ticker")
         else:
-            idx_sel = st.selectbox("Búnker para escaneo", range(len(bunker_options)), format_func=lambda i: bunker_options[i][1], key="scr_bunker_sel")
-            selected_bunker_id = bunker_options[idx_sel][0]
-        tickers_clean = []
-        if selected_bunker_id:
-            bunker_data = get_bunker_by_id(selected_bunker_id, user_id)
-            if bunker_data and bunker_data.get("tickers_text"):
-                tickers_clean = sorted({x.strip().upper() for x in bunker_data["tickers_text"].split(",") if x.strip()})
-
-        with st.expander("🏗️ Gestionar búnkers", expanded=False):
-            st.caption("Varios búnkeres permiten búsquedas selectivas y ahorran uso de datos (APIs gratuitas).")
-            st.markdown("#### ➕ Crear búnker")
-            new_bunker_name = st.text_input("Nombre del nuevo búnker", value="", placeholder="Ej. Tech, Dividendos", key="new_bunker_name")
-            new_bunker_tickers = st.text_area("Tickers (separados por coma)", value="", height=80, key="new_bunker_ta", placeholder="AAPL, MSFT, NVDA")
+            if not bunker_options:
+                st.caption("Crea un búnker abajo para barrer por varios tickers.")
+            else:
+                st.selectbox("Búnker a escanear", range(len(bunker_options)), format_func=lambda i: bunker_options[i][1], key="scr_bunker_sel")
+        st.markdown("---")
+        with st.expander("🏗️ Crear y editar búnkers", expanded=False):
+            st.caption("Los búnkers son listas de tickers (ej. Tech: AAPL, MSFT, NVDA). Elige **Búnker** arriba y luego **Iniciar barrido**.")
+            st.markdown("**Crear nuevo**")
+            new_bunker_name = st.text_input("Nombre del búnker", value="", placeholder="Ej. Tech", key="new_bunker_name")
+            new_bunker_tickers = st.text_area("Tickers separados por coma", value="", height=50, key="new_bunker_ta", placeholder="AAPL, MSFT, NVDA")
             if st.button("➕ Crear búnker", key="create_bunker_btn"):
                 if user_id and new_bunker_name and new_bunker_name.strip():
                     bid = create_bunker(user_id, new_bunker_name.strip(), new_bunker_tickers or "")
                     if bid:
-                        st.success(f"Búnker «{new_bunker_name.strip()}» creado.")
+                        st.success(f"Búnker «{new_bunker_name.strip()}» creado. Elige **Búnker** arriba y este búnker para barrer.")
                         st.rerun()
                     else:
-                        st.warning("Nombre ya existe. Elige otro.")
+                        st.warning("Nombre ya existe.")
                 else:
                     st.warning("Escribe un nombre.")
-            st.markdown("---")
-            st.markdown("#### ✏️ Editar o eliminar búnker")
             if bunkers:
+                st.markdown("---")
+                st.markdown("**Editar o eliminar**")
                 edit_options = [(b["bunker_id"], b["name"]) for b in bunkers]
-                edit_idx = st.selectbox("Editar búnker", range(len(edit_options)), format_func=lambda i: edit_options[i][1], key="edit_bunker_sel")
+                edit_idx = st.selectbox("Seleccionar búnker", range(len(edit_options)), format_func=lambda i: edit_options[i][1], key="edit_bunker_sel")
                 edit_bunker_id = edit_options[edit_idx][0]
                 edit_bunker = get_bunker_by_id(edit_bunker_id, user_id)
                 edit_name = st.text_input("Nombre", value=edit_bunker.get("name", "") if edit_bunker else "", key="edit_bunker_name")
-                edit_tickers = st.text_area("Tickers (coma)", value=edit_bunker.get("tickers_text", "") if edit_bunker else "", height=80, key="edit_bunker_ta")
+                edit_tickers = st.text_area("Tickers (coma)", value=edit_bunker.get("tickers_text", "") if edit_bunker else "", height=50, key="edit_bunker_ta")
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    if st.button("💾 Guardar", key="save_edit_bunker_btn"):
+                    if st.button("💾 Guardar cambios", key="save_edit_bunker_btn"):
                         if user_id and edit_name and edit_name.strip():
-                            ok = update_bunker(edit_bunker_id, user_id, edit_name.strip(), edit_tickers or "")
-                            if ok:
+                            if update_bunker(edit_bunker_id, user_id, edit_name.strip(), edit_tickers or ""):
                                 st.success("Búnker actualizado.")
                                 st.rerun()
                 with col_b:
-                    if st.button("🗑️ Eliminar", key="del_bunker_btn"):
+                    if st.button("🗑️ Eliminar búnker", key="del_bunker_btn"):
                         if delete_bunker(edit_bunker_id, user_id):
                             st.success("Búnker eliminado.")
                             st.rerun()
-
-        st.markdown("---")
-        origen_sel = st.selectbox("Origen", ["🏗️ BÚNKER", "🎯 INDIVIDUAL"], key="origen_escaneo")
-        if origen_sel == "🎯 INDIVIDUAL" or estrategia == "Covered Call (CC)":
-            single_ticker = st.text_input("Ticker individual", "NVDA", key="single_ticker").strip().upper()
-            tickers_lista = [single_ticker] if single_ticker else []
-        else:
-            tickers_lista = list(tickers_clean)
         run_scan = st.button("🚀 Iniciar barrido", type="primary", use_container_width=True, key="scr_run_btn")
-
         st.markdown("---")
-        st.caption("Analizar un contrato (formato Thinkorswim)")
-        manual_symbol = st.text_input("Símbolo opción", value=st.session_state.get("screener_manual_symbol", ""), placeholder=".NOW260227P105 o .NOW260227C108", key="manual_option_symbol")
+        st.caption("Analizar contrato (Thinkorswim)")
+        manual_symbol = st.text_input("Símbolo opción", value=st.session_state.get("screener_manual_symbol", ""), placeholder=".NOW260227P105", key="manual_option_symbol")
         col_an, col_cl = st.columns(2)
         with col_an:
             if st.button("Analizar contrato", key="analyze_manual_btn"):
@@ -359,13 +344,53 @@ def render_screener_page(user_id: int) -> None:
                 if "screener_manual_symbol" in st.session_state:
                     del st.session_state["screener_manual_symbol"]
                 st.rerun()
+    return bool(run_scan)
+
+
+def render_screener_page(user_id: int, run_scan: bool = False) -> None:
+    """
+    Screener: resultados en contenido principal. Filtros se leen de session state (formulario en barra lateral).
+    """
+    token, env = _get_tradier_token_for_user(user_id)
+    api_tradier = "https://api.tradier.com/v1/" if (env or "sandbox") == "prod" else "https://sandbox.tradier.com/v1/"
+    headers_tradier = {"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"} if token else {}
+    bunkers = get_user_bunkers(user_id) if user_id else []
+    estrategia = st.session_state.get("scr_estrategia", "Cash Secured Put (CSP)")
+    dte_min = st.session_state.get("scr_dte_min", 7)
+    dte_max = st.session_state.get("scr_dte_max", 30)
+    delta_lo = st.session_state.get("scr_delta_lo", -0.20)
+    delta_hi = st.session_state.get("scr_delta_hi", -0.10)
+    dte_r = (min(dte_min, dte_max), max(dte_min, dte_max))
+    delta_r = (min(delta_lo, delta_hi), max(delta_lo, delta_hi))
+    roi_min_f = st.session_state.get("scr_roi", 20.0)
+    colateral_disponible = st.session_state.get("scr_colateral", 10000.0)
+    f_sma = st.session_state.get("scr_sma", False)
+    f_stoch = st.session_state.get("scr_stoch", False)
+    f_earnings = st.session_state.get("scr_earn", False)
+    bunker_options = [(b["bunker_id"], f"{b['name']} ({len([x for x in (b.get('tickers_text') or '').split(',') if x.strip()])} tickers)") for b in bunkers]
+    scr_bunker_idx = st.session_state.get("scr_bunker_sel", 0)
+    scr_bunker_idx = min(max(0, scr_bunker_idx), len(bunker_options) - 1) if bunker_options else 0
+    selected_bunker_id = bunker_options[scr_bunker_idx][0] if bunker_options else None
+    tickers_clean = []
+    if selected_bunker_id:
+        bunker_data = get_bunker_by_id(selected_bunker_id, user_id)
+        if bunker_data and bunker_data.get("tickers_text"):
+            tickers_clean = sorted({x.strip().upper() for x in bunker_data["tickers_text"].split(",") if x.strip()})
+    origen_sel = st.session_state.get("origen_escaneo", "🎯 Ticker individual")
+    single_ticker = (st.session_state.get("single_ticker") or "NVDA").strip().upper()
+    if origen_sel == "🎯 Ticker individual" or estrategia == "Covered Call (CC)":
+        tickers_lista = [single_ticker] if single_ticker else []
+    else:
+        tickers_lista = list(tickers_clean)
+
+    av_key = (st.session_state.get("screener_av_key") or "").strip() or (get_user_screener_settings(user_id) or {}).get("av_api_key") or ""
 
     # ---------- Mensajes si falta config o datos ----------
     if not token:
         st.info("Configura el **token Tradier** en **Mi cuenta** (cambia de vista arriba) para ejecutar el barrido.")
         return
     if not tickers_lista and not st.session_state.get("screener_manual_symbol"):
-        st.info("Arriba: crea un **búnker** en **Gestionar búnkers** y selecciónalo, o elige **Individual** y escribe un ticker, o pega un símbolo Thinkorswim para analizar un contrato.")
+        st.info("En la **barra lateral**: elige **Búnker** y un búnker (o créalo en **Crear y editar búnkers**), o elige **Ticker individual** y escribe un símbolo. Luego pulsa **Iniciar barrido**. También puedes pegar un símbolo Thinkorswim abajo para analizar un contrato.")
         return
 
     @st.cache_data(ttl=86400, show_spinner=False)
@@ -834,20 +859,27 @@ def render_screener_page(user_id: int) -> None:
                     opts = [opts]
 
                 for opt in opts:
+                    if not isinstance(opt, dict):
+                        continue
                     opt_type = "put" if estrategia == "Cash Secured Put (CSP)" else "call"
                     if opt.get("option_type") != opt_type:
                         continue
-                    strike = float(opt["strike"])
+                    try:
+                        strike = float(opt.get("strike") or 0)
+                    except (TypeError, ValueError):
+                        continue
                     bid = opt.get("bid") or 0.0
                     ask = opt.get("ask") or 0.0
                     premium = round(float((bid + ask) / 2), 2)
+                    greeks = opt.get("greeks")
+                    if not isinstance(greeks, dict):
+                        greeks = {}
+                    delta = float(greeks.get("delta") or 0)
 
                     if estrategia == "Cash Secured Put (CSP)":
                         base = strike
-                        delta = float(opt.get("greeks", {}).get("delta", 0) or 0.0)
                     else:
                         base = price
-                        delta = float(opt.get("greeks", {}).get("delta", 0) or 0.0)
 
                     lo, hi = min(delta_r[0], delta_r[1]), max(delta_r[0], delta_r[1])
                     if not (lo <= delta <= hi):
@@ -893,9 +925,7 @@ def render_screener_page(user_id: int) -> None:
                             "sma40_val": sma40,
                             "atr_val": atr_v,
                             "hv": hv_v,
-                            "iv": (opt.get("greeks", {}).get("mid_iv", 0) or 0.0) * 100
-                            if isinstance(opt.get("greeks"), dict)
-                            else 0.0,
+                            "iv": (float(greeks.get("mid_iv") or 0) * 100),
                         }
                     )
             prog.progress((idx + 1) / float(total))
@@ -906,7 +936,7 @@ def render_screener_page(user_id: int) -> None:
     df = st.session_state.get("screener_res")
     if df is None or df.empty:
         st.markdown("### 🔎 Screener")
-        st.caption("Usa el botón **Iniciar barrido** en **Filtros del Screener** (arriba) para ejecutar el escaneo. Los resultados aparecerán aquí.")
+        st.caption("Usa el botón **Iniciar barrido** en la **barra lateral** (Filtros del Screener) para ejecutar el escaneo. Los resultados aparecerán aquí.")
         return
 
     st.markdown("### 📊 Dashboard de resultados")
@@ -1190,48 +1220,53 @@ def run():
         # Navegación: Screener o Mi Cuenta (sidebar mínimo para que local siga viendo el radio)
         main_view = st.radio("Ir a", ["🔎 Screener", "📊 Mi Cuenta"], key="main_view_radio", horizontal=True)
         show_screener_page = main_view == "🔎 Screener"
-
-    # ---------- Contenido principal: cuenta, Roll-over, Añadir posición (web y móvil sin depender del sidebar) ----------
-    account_id = None
-    acc_data = {}
-    token = ""
-    if not show_screener_page:
-        accounts = get_accounts_for_current_user()
-        if not accounts:
-            st.warning("Sin cuentas. Ve a la pestaña **Mi cuenta** (abajo) para crear una.")
+        run_scan = False
+        if show_screener_page:
+            st.caption("**Filtros del Screener** — Configura y pulsa **Iniciar barrido**.")
+            try:
+                run_scan = _render_screener_sidebar_form(user_id)
+            except Exception as e:
+                st.error(f"Error al cargar filtros: {e}")
+                run_scan = False
         else:
-            acc_names = [a["name"] for a in accounts]
-            idx = 0
-            if get_current_account_id():
-                for i, a in enumerate(accounts):
-                    if a["account_id"] == get_current_account_id():
-                        idx = i
-                        break
-            sel_acc_name = st.selectbox("Cuenta activa", acc_names, index=idx, key="sel_acc")
-            acc_data = next(a for a in accounts if a["name"] == sel_acc_name)
-            set_current_account_id(acc_data["account_id"])
-            account_id = acc_data["account_id"]
-            token = (acc_data.get("access_token") or "").strip() if account_id else ""
+            st.caption("**Cuenta y posiciones** — Elige cuenta, roll-over o añadir posición.")
+            # ---------- Formulario de cuenta en la barra lateral ----------
+            account_id_side = None
+            accounts = get_accounts_for_current_user()
+            if not accounts:
+                st.warning("Sin cuentas. Ve a la pestaña **Mi cuenta** (abajo) para crear una.")
+            else:
+                acc_names = [a["name"] for a in accounts]
+                idx = 0
+                if get_current_account_id():
+                    for i, a in enumerate(accounts):
+                        if a["account_id"] == get_current_account_id():
+                            idx = i
+                            break
+                sel_acc_name = st.selectbox("Cuenta activa", acc_names, index=idx, key="sel_acc")
+                acc_data_side = next(a for a in accounts if a["name"] == sel_acc_name)
+                set_current_account_id(acc_data_side["account_id"])
+                account_id_side = acc_data_side["account_id"]
+                token_side = (acc_data_side.get("access_token") or "").strip()
 
-            if account_id and token:
-                provider = TradierProvider(token, acc_data.get("environment") or "sandbox")
-                status = provider.validate_connection()
-                if status.online:
-                    st.success("🟢 Online")
-                    db.set_account_connection_status(account_id, "online")
-                else:
-                    st.error(f"🔴 Offline — {status.message}")
-                    db.set_account_connection_status(account_id, "offline")
-            elif account_id:
-                st.caption("Token no configurado. Pestaña **Mi cuenta** (abajo) → Token Tradier")
+                if account_id_side and token_side:
+                    provider = TradierProvider(token_side, acc_data_side.get("environment") or "sandbox")
+                    status = provider.validate_connection()
+                    if status.online:
+                        st.success("🟢 Online")
+                        db.set_account_connection_status(account_id_side, "online")
+                    else:
+                        st.error(f"🔴 Offline — {status.message}")
+                        db.set_account_connection_status(account_id_side, "offline")
+                elif account_id_side:
+                    st.caption("Token no configurado. Pestaña **Mi cuenta** (abajo) → Token Tradier")
 
-        if not show_screener_page:
             with st.expander("🔄 Roll-over", expanded=False):
-                if not account_id:
+                if not account_id_side:
                     st.caption("Selecciona una cuenta para hacer roll-over.")
                 else:
                     roll_type = st.radio("Tipo de posición a hacer roll", ["CSP", "CC"], horizontal=True, key="roll_type")
-                    trades_open_roll = get_trades_by_account(account_id, status="OPEN")
+                    trades_open_roll = get_trades_by_account(account_id_side, status="OPEN")
                     roll_list = [t for t in trades_open_roll if (t.get("strategy_type") or "").upper() == roll_type]
                     if not roll_list:
                         st.info(f"No hay posiciones abiertas de tipo **{roll_type}** para hacer roll.")
@@ -1245,11 +1280,11 @@ def run():
                         new_premium = st.number_input("Nueva prima por contrato", value=float(tr.get("price") or 0), min_value=0.0, step=0.01, format="%.2f", key="roll_new_premium")
                         roll_comment = st.text_area("Comentario (bitácora)", value=f"Roll desde Strike {fmt2(tr.get('strike'))}", key="roll_comment")
                         if st.button("Ejecutar roll-over"):
-                            close_trade(tr["trade_id"], account_id, date.today().isoformat())
+                            close_trade(tr["trade_id"], account_id_side, date.today().isoformat())
                             if roll_type == "CSP":
-                                register_csp_opening(account_id, user_id, tr["ticker"], tr["quantity"], new_strike, new_premium, new_exp_d.isoformat(), date.today().isoformat(), roll_comment or None, parent_trade_id=tr["trade_id"])
+                                register_csp_opening(account_id_side, user_id, tr["ticker"], tr["quantity"], new_strike, new_premium, new_exp_d.isoformat(), date.today().isoformat(), roll_comment or None, parent_trade_id=tr["trade_id"])
                             else:
-                                register_cc_opening(account_id, user_id, tr["ticker"], tr["quantity"], new_strike, new_premium, new_exp_d.isoformat(), date.today().isoformat(), roll_comment or None, parent_trade_id=tr["trade_id"])
+                                register_cc_opening(account_id_side, user_id, tr["ticker"], tr["quantity"], new_strike, new_premium, new_exp_d.isoformat(), date.today().isoformat(), roll_comment or None, parent_trade_id=tr["trade_id"])
                             for k in ["roll_sel", "roll_new_strike", "roll_new_exp", "roll_new_premium", "roll_comment"]:
                                 if k in st.session_state:
                                     del st.session_state[k]
@@ -1257,7 +1292,7 @@ def run():
                             st.rerun()
 
             with st.expander("➕ Añadir posición", expanded=False):
-                if not account_id:
+                if not account_id_side:
                     st.info("Crea una cuenta en **Mi cuenta** para registrar movimientos.")
                 else:
                     st.caption("**CSP** = vender put (colateral; no requiere acciones). **CC** = poseer acciones y vender call (registra antes compra directa o asignación).")
@@ -1272,7 +1307,7 @@ def run():
                         comment = st.text_area("Comentario", value="", key="add_csp_comment")
                         if st.button("Registrar CSP"):
                             if ticker and strike and strike > 0:
-                                register_csp_opening(account_id, user_id, ticker, qty, strike, premium, exp_date.isoformat(), trade_date, comment or None)
+                                register_csp_opening(account_id_side, user_id, ticker, qty, strike, premium, exp_date.isoformat(), trade_date, comment or None)
                                 for k in ["add_trade_date", "add_csp_ticker", "add_csp_qty", "add_csp_strike", "add_csp_premium", "add_csp_exp", "add_csp_comment"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
@@ -1285,7 +1320,7 @@ def run():
                         qty = st.number_input("Contratos", min_value=1, value=1, key="add_cc_qty")
                         shares_needed = qty * 100
                         if ticker:
-                            shares_now = get_stock_quantity(account_id, ticker)
+                            shares_now = get_stock_quantity(account_id_side, ticker)
                             if shares_now < shares_needed:
                                 st.warning(f"**Covered Call requiere tener las acciones.** Tienes **{shares_now}** de {ticker}; necesitas **{shares_needed}**. Registra antes compra directa o asignación.")
                             else:
@@ -1299,10 +1334,10 @@ def run():
                                 st.error("Indica el ticker.")
                             elif not strike or strike <= 0:
                                 st.error("Indica el strike (mayor que 0).")
-                            elif get_stock_quantity(account_id, ticker) < qty * 100:
+                            elif get_stock_quantity(account_id_side, ticker) < qty * 100:
                                 st.error(f"No tienes suficientes acciones. Necesitas **{qty * 100}** de **{ticker}**. Registra antes compra directa o asignación.")
                             else:
-                                register_cc_opening(account_id, user_id, ticker, qty, strike, premium, exp_date.isoformat(), trade_date, comment or None)
+                                register_cc_opening(account_id_side, user_id, ticker, qty, strike, premium, exp_date.isoformat(), trade_date, comment or None)
                                 for k in ["add_trade_date", "add_cc_ticker", "add_cc_qty", "add_cc_strike", "add_cc_premium", "add_cc_exp", "add_cc_comment"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
@@ -1319,7 +1354,7 @@ def run():
                             elif not price or price <= 0:
                                 st.error("Indica el **precio por acción** (debe ser mayor que 0).")
                             else:
-                                register_direct_purchase(account_id, user_id, ticker, qty, price, trade_date, comment or None)
+                                register_direct_purchase(account_id_side, user_id, ticker, qty, price, trade_date, comment or None)
                                 for k in ["add_trade_date", "add_buy_ticker", "add_buy_qty", "add_buy_price", "add_buy_comment"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
@@ -1327,7 +1362,7 @@ def run():
                                 st.rerun()
                     elif reg_type == "Asignación CSP":
                         st.caption("**Asignación de put**: te ejercieron el put (CSP) y recibiste las acciones. Elige el CSP que fue asignado.")
-                        trades_open_add = get_trades_by_account(account_id, status="OPEN") or []
+                        trades_open_add = get_trades_by_account(account_id_side, status="OPEN") or []
                         csp_open = [t for t in trades_open_add if (t.get("strategy_type") or "").upper() == "CSP"]
                         if not csp_open:
                             st.info("No tienes CSP abiertos. Solo puedes registrar asignación de un put que tenías vendido (CSP) y que expiró en el dinero.")
@@ -1339,7 +1374,7 @@ def run():
                             assign_price = st.number_input("Precio de asignación (por acción)", min_value=0.0, value=float(tr.get("strike") or 0), step=0.01, key="add_assign_price", help="Suele ser el strike del put.")
                             comment_assign = st.text_area("Comentario", value="", key="add_assign_comment")
                             if st.button("Registrar asignación CSP"):
-                                register_assignment(account_id, user_id, parent_trade_id, tr["ticker"], (tr.get("quantity") or 0) * 100, assign_price, trade_date, comment_assign or None)
+                                register_assignment(account_id_side, user_id, parent_trade_id, tr["ticker"], (tr.get("quantity") or 0) * 100, assign_price, trade_date, comment_assign or None)
                                 for k in ["add_assign_csp_sel", "add_assign_price", "add_assign_comment"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
@@ -1347,7 +1382,7 @@ def run():
                                 st.rerun()
                     elif reg_type == "Asignación CC":
                         st.caption("**Asignación de Covered Call**: te asignaron el call y te compraron las acciones al strike. Registra el cierre del CC.")
-                        trades_open_cc = get_trades_by_account(account_id, status="OPEN") or []
+                        trades_open_cc = get_trades_by_account(account_id_side, status="OPEN") or []
                         cc_open = [t for t in trades_open_cc if (t.get("strategy_type") or "").upper() == "CC"]
                         if not cc_open:
                             st.info("No tienes Covered Calls abiertos. Solo puedes registrar asignación cuando te asignan un call que habías vendido.")
@@ -1357,14 +1392,14 @@ def run():
                             cc_trade_id = opts_cc[idx_cc][0]
                             comment_cc = st.text_area("Comentario", value="", key="add_exercise_cc_comment")
                             if st.button("Registrar asignación CC (cerrar posición)"):
-                                close_trade(cc_trade_id, account_id, trade_date)
+                                close_trade(cc_trade_id, account_id_side, trade_date)
                                 for k in ["add_exercise_cc_sel", "add_exercise_cc_comment"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
                                 st.success("Asignación de CC registrada: posición cerrada. Las acciones fueron vendidas al strike.")
                                 st.rerun()
                     elif reg_type == "Dividendo":
-                        tickers_owned = [s["ticker"] for s in get_position_summary(account_id)] if account_id else []
+                        tickers_owned = [s["ticker"] for s in get_position_summary(account_id_side)] if account_id_side else []
                         if not tickers_owned:
                             st.caption("Solo puedes registrar dividendos de tickers que posees. No tienes posiciones; registra antes una compra directa o CSP/CC.")
                         else:
@@ -1378,7 +1413,7 @@ def run():
                                 if not ticker:
                                     st.error("Elige un ticker de la lista (posiciones que posees).")
                                 else:
-                                    register_dividend(account_id, ticker, amount, ex_date_w.isoformat(), pay_date_w.isoformat() if pay_date_w else None, note or None)
+                                    register_dividend(account_id_side, ticker, amount, ex_date_w.isoformat(), pay_date_w.isoformat() if pay_date_w else None, note or None)
                                     for k in ["add_div_ticker", "add_div_ticker_sel", "add_div_amount", "add_div_ex_date", "add_div_pay_date", "add_div_note"]:
                                         if k in st.session_state:
                                             del st.session_state[k]
@@ -1393,7 +1428,7 @@ def run():
                         note = st.text_area("Nota", value="", key="add_adj_note")
                         if st.button("Registrar ajuste"):
                             if ticker:
-                                register_adjustment(account_id, ticker, adj_type, old_val, new_val, note or None)
+                                register_adjustment(account_id_side, ticker, adj_type, old_val, new_val, note or None)
                                 for k in ["add_adj_ticker", "add_adj_type", "add_adj_old", "add_adj_new", "add_adj_note"]:
                                     if k in st.session_state:
                                         del st.session_state[k]
@@ -1406,10 +1441,28 @@ def run():
                 logout_user()
                 st.rerun()
 
-    account_id = get_current_account_id()
-    accounts = get_accounts_for_current_user()
-    acc_data = next((a for a in accounts if a["account_id"] == account_id), {}) if account_id else {}
-    token = (acc_data.get("access_token") or "").strip() if account_id else ""
+    # Cuenta activa para contenido principal (cuando no es Screener)
+    if not show_screener_page:
+        accounts = get_accounts_for_current_user()
+        sel_acc = st.session_state.get("sel_acc")
+        if accounts and sel_acc:
+            acc_data = next((a for a in accounts if a["name"] == sel_acc), None)
+            if acc_data:
+                account_id = acc_data["account_id"]
+                set_current_account_id(account_id)
+                token = (acc_data.get("access_token") or "").strip()
+            else:
+                account_id = None
+                acc_data = {}
+                token = ""
+        else:
+            account_id = None
+            acc_data = {}
+            token = ""
+    else:
+        account_id = None
+        acc_data = {}
+        token = ""
 
     # Navegación principal (visible en web, móvil y local)
     st.caption("Cambiar de vista:")
@@ -1426,7 +1479,7 @@ def run():
 
     # Screener es por usuario y se muestra como vista separada (no pestaña de cuenta)
     if show_screener_page:
-        render_screener_page(user_id)
+        render_screener_page(user_id, run_scan)
         return
 
     tab_dash, tab_tutorial, tab_report, tab_settings = st.tabs(

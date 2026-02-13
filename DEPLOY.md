@@ -65,6 +65,17 @@ Si GitHub te pide autenticación, usa tu usuario y un **Personal Access Token** 
 - **Branch**: `main`.
 - **Main file path**: `app/Home.py` (punto de entrada con login/registro).
 
+### 2.2.1 Web y móvil igual que la versión local
+
+Para que la app en **web** y **móvil** se vea y se comporte igual que en local:
+
+1. **Configuración unificada**: El repositorio incluye `.streamlit/config.toml` con tema oscuro, colores y barra lateral coherentes. Streamlit Cloud usa este archivo al desplegar, así que web y móvil heredan la misma apariencia que en tu PC.
+2. **Mismo punto de entrada**: Si en local usas `streamlit run main_app.py`, la interfaz (formularios en sidebar, Screener, Mi Cuenta) es la de **cockpit** cuando despliegas con `app/Home.py`: tras el login se carga el mismo cockpit con los mismos formularios en la barra lateral.
+3. **Barra lateral abierta**: Tanto `app/Home.py` como `main_app.py` usan `initial_sidebar_state="expanded"`, así que la barra lateral aparece abierta por defecto en local, web y móvil.
+4. **Tras subir cambios**: Después de un `git push`, haz un **Reboot** de la app en Streamlit Cloud (ver 2.5) para que se aplique el último código y la config.
+
+En **móvil**, si la barra lateral se colapsa por espacio, el usuario puede abrirla con el icono **>** arriba a la izquierda; los formularios (Screener, Cuenta activa, etc.) están dentro de esa barra.
+
 ### 2.3 Restricción por email (usuarios autorizados)
 
 Antes de desplegar, abre **"Advanced settings"** y en **Secrets** pega exactamente esto (formato TOML):

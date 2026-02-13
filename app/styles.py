@@ -190,7 +190,12 @@ PROFESSIONAL_CSS = """
     .rad-metric .v { font-size: 1.1rem; font-weight: 600; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 4ch; }
     .rad-metric.ok .v { color: #3fb950; }
     .rad-metric.risk .v { color: #f85149; }
-    .rad-metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1rem; }
+    .rad-metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 0.75rem 1.5rem; align-items: start; }
+    .rad-metrics-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-family: 'JetBrains Mono', monospace; background: #0d1117; border-radius: 10px; overflow: hidden; }
+    .rad-metrics-table td { padding: 0.6rem 1rem; border-bottom: 1px solid #21262d; }
+    .rad-metrics-table tr:last-child td { border-bottom: none; }
+    .rad-metrics-table .k { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.2rem; }
+    .rad-metrics-table .v { font-size: 1rem; font-weight: 600; color: #e6edf3; }
     /* Reportes */
     .report-hero {
         background: linear-gradient(135deg, #1a2332 0%, #0d1117 50%);
