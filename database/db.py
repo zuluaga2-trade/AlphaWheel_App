@@ -81,6 +81,7 @@ def _pg_quote_user_table(sql: str) -> str:
         (" FROM User ", ' FROM "User" '),
         (" INTO User ", ' INTO "User" '),
         (" UPDATE User ", ' UPDATE "User" '),
+        ("UPDATE User ", 'UPDATE "User" '),  # inicio de sentencia (sin espacio delante)
         (" DELETE FROM User ", ' DELETE FROM "User" '),
     ]:
         sql = sql.replace(a, b)
@@ -329,6 +330,22 @@ def update_user_password(user_id: int, password_hash: str):
 
 def get_user_screener_settings(user_id: int) -> dict:
     """Devuelve av_api_key y screener_watchlist del usuario (screener es por usuario, no por cuenta)."""
+    if not user_id:
+        return {"av_api_key": "", "screener_watchlist": ""}
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute('SELECT av_api_key, screener_watchlist FROM "User" WHERE user_id = %s', (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return {"av_api_key": "", "screener_watchlist": ""}
+            return {"av_api_key": (row.get("av_api_key") or "").strip(), "screener_watchlist": (row.get("screener_watchlist") or "").strip()}
+        except Exception:
+            return {"av_api_key": "", "screener_watchlist": ""}
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -353,6 +370,15 @@ def get_user_screener_settings(user_id: int) -> dict:
 
 def update_user_av_key(user_id: int, av_api_key: str) -> None:
     """Guarda la clave Alpha Vantage del usuario (screener)."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            cur.execute('UPDATE "User" SET av_api_key = %s WHERE user_id = %s', (av_api_key or "", user_id))
+        finally:
+            conn.close()
+        return
     conn = get_conn()
     try:
         conn.execute("UPDATE User SET av_api_key = ? WHERE user_id = ?", (av_api_key or "", user_id))
