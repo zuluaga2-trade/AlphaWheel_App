@@ -376,6 +376,19 @@ def get_user_bunkers(user_id: int) -> list:
     """Lista de búnkeres del usuario: [{"bunker_id", "name", "tickers_text", "created_at"}, ...]."""
     if not user_id:
         return []
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT bunker_id, user_id, name, tickers_text, created_at FROM UserBunker WHERE user_id = %s ORDER BY name",
+                (user_id,),
+            )
+            rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -391,6 +404,19 @@ def get_bunker_by_id(bunker_id: int, user_id: int) -> dict | None:
     """Un búnker por ID (solo si pertenece al usuario)."""
     if not bunker_id or not user_id:
         return None
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT bunker_id, user_id, name, tickers_text, created_at FROM UserBunker WHERE bunker_id = %s AND user_id = %s",
+                (bunker_id, user_id),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -407,6 +433,24 @@ def create_bunker(user_id: int, name: str, tickers_text: str = "") -> int | None
     """Crea un búnker. Devuelve bunker_id o None si falla (ej. nombre duplicado)."""
     if not user_id or not (name or "").strip():
         return None
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                """INSERT INTO UserBunker (user_id, name, tickers_text) VALUES (%s, %s, %s)
+                 RETURNING bunker_id""",
+                (user_id, (name or "").strip(), (tickers_text or "").strip()),
+            )
+            row = cur.fetchone()
+            return row["bunker_id"] if row else None
+        except Exception as e:
+            if pg_IntegrityError and isinstance(e, pg_IntegrityError):
+                return None
+            raise
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -429,6 +473,31 @@ def update_bunker(bunker_id: int, user_id: int, name: str | None = None, tickers
     """Actualiza nombre y/o tickers de un búnker. Solo si pertenece al user_id."""
     if not bunker_id or not user_id:
         return False
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            if name is not None and tickers_text is not None:
+                cur.execute(
+                    "UPDATE UserBunker SET name = %s, tickers_text = %s WHERE bunker_id = %s AND user_id = %s",
+                    (name.strip(), (tickers_text or "").strip(), bunker_id, user_id),
+                )
+            elif name is not None:
+                cur.execute(
+                    "UPDATE UserBunker SET name = %s WHERE bunker_id = %s AND user_id = %s",
+                    (name.strip(), bunker_id, user_id),
+                )
+            elif tickers_text is not None:
+                cur.execute(
+                    "UPDATE UserBunker SET tickers_text = %s WHERE bunker_id = %s AND user_id = %s",
+                    ((tickers_text or "").strip(), bunker_id, user_id),
+                )
+            else:
+                return False
+            return cur.rowcount > 0
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         if name is not None and tickers_text is not None:
@@ -458,6 +527,15 @@ def delete_bunker(bunker_id: int, user_id: int) -> bool:
     """Elimina un búnker. Solo si pertenece al user_id."""
     if not bunker_id or not user_id:
         return False
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM UserBunker WHERE bunker_id = %s AND user_id = %s", (bunker_id, user_id))
+            return cur.rowcount > 0
+        finally:
+            conn.close()
     conn = get_conn()
     try:
         cur = conn.execute("DELETE FROM UserBunker WHERE bunker_id = ? AND user_id = ?", (bunker_id, user_id))
