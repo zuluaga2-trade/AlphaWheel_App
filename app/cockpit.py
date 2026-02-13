@@ -1176,6 +1176,10 @@ def run():
         st.session_state["main_view_radio"] = "📊 Mi Cuenta"
 
     with st.sidebar:
+        # Sincronizar navegación desde botones del contenido (no se puede asignar a key del widget después de crearlo)
+        if "nav_to_view" in st.session_state:
+            st.session_state["main_view_radio"] = st.session_state["nav_to_view"]
+            del st.session_state["nav_to_view"]
         st.header("🦅 Alpha Control")
         st.markdown(
             f'<div class="user-badge">👤 {html_module.escape(get_current_user_display_name() or get_current_user_email())}</div>',
@@ -1412,11 +1416,11 @@ def run():
     nc1, nc2 = st.columns(2)
     with nc1:
         if st.button("🔎 Screener", key="nav_content_screener", use_container_width=True):
-            st.session_state["main_view_radio"] = "🔎 Screener"
+            st.session_state["nav_to_view"] = "🔎 Screener"
             st.rerun()
     with nc2:
         if st.button("📊 Mi Cuenta", key="nav_content_micuenta", use_container_width=True):
-            st.session_state["main_view_radio"] = "📊 Mi Cuenta"
+            st.session_state["nav_to_view"] = "📊 Mi Cuenta"
             st.rerun()
     st.markdown("---")
 
