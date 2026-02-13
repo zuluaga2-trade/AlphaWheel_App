@@ -183,12 +183,17 @@ st.markdown("""
     .rad-hero.loss { background: linear-gradient(135deg, rgba(248,81,73,0.25) 0%, rgba(248,81,73,0.08) 100%); border: 1px solid rgba(248,81,73,0.5); color: #f85149; }
     .rad-card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 1.5rem; margin: 1.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
     .rad-metrics { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 1rem 1.25rem; background: #0d1117; border-radius: 10px; margin-top: 1rem; font-family: 'JetBrains Mono', monospace; }
-    .rad-metric { display: flex; flex-direction: column; gap: 0.25rem; }
+    .rad-metric { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
     .rad-metric .k { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
     .rad-metric .v { font-size: 1.1rem; font-weight: 600; color: #e6edf3; }
     .rad-metric.ok .v { color: #3fb950; }
     .rad-metric.risk .v { color: #f85149; }
     .rad-metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 1rem; }
+    @media (max-width: 768px) {
+        .rad-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 0.75rem; padding: 0.75rem 1rem; }
+        .rad-metric .k { font-size: 0.7rem; }
+        .rad-metric .v { font-size: 1rem; word-break: break-word; }
+    }
     .rad-thermometer-wrap { margin: 1.5rem 0; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .rad-thermometer-label { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #8b949e; }
     .rad-thermometer-bar { flex: 1; min-width: 180px; height: 28px; background: linear-gradient(90deg, #f85149 0%, #8b949e 50%, #3fb950 100%); border-radius: 14px; position: relative; }

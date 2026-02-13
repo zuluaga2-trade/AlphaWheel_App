@@ -191,6 +191,12 @@ PROFESSIONAL_CSS = """
     .rad-metric.ok .v { color: #3fb950; }
     .rad-metric.risk .v { color: #f85149; }
     .rad-metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 0.75rem 1.5rem; align-items: start; }
+    /* Móvil: métricas debajo del medidor en 2 columnas, sin truncar */
+    @media (max-width: 768px) {
+        .rad-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 0.75rem; padding: 0.75rem 1rem; }
+        .rad-metric .k { font-size: 0.7rem; display: block; margin-bottom: 0.15rem; }
+        .rad-metric .v { font-size: 1rem; white-space: normal; word-break: break-word; overflow: visible; text-overflow: unset; }
+    }
     .rad-metrics-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-family: 'JetBrains Mono', monospace; background: #0d1117; border-radius: 10px; overflow: hidden; }
     .rad-metrics-table td { padding: 0.6rem 1rem; border-bottom: 1px solid #21262d; }
     .rad-metrics-table tr:last-child td { border-bottom: none; }
