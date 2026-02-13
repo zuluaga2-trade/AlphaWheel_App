@@ -117,9 +117,12 @@ def _run_pg_schema(conn):
             f"Esquema PostgreSQL no encontrado: schema_pg.sql. Probadas: {[str(p) for p in [Path(__file__).resolve().parent, Path.cwd() / 'database']]}"
         )
     sql = path.read_text(encoding="utf-8")
-    for stmt in sql.split(";"):
+    # Quitar líneas que son solo comentarios o vacías, para que el split por ";" no deje el primer CREATE en un bloque que empiece con "--"
+    lines = [ln for ln in sql.splitlines() if ln.strip() and not ln.strip().startswith("--")]
+    sql_clean = "\n".join(lines)
+    for stmt in sql_clean.split(";"):
         stmt = stmt.strip()
-        if stmt and not stmt.startswith("--"):
+        if stmt:
             conn.execute(stmt)
     conn.commit()
 
