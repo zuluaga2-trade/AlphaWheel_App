@@ -2131,20 +2131,23 @@ def run():
         else:
             acc = None
         if acc:
-            new_token = st.text_input("Token de acceso (Tradier)", value=(acc.get("access_token") or ""), type="password", placeholder="Token Tradier", key="token_mi_cuenta")
-            env = st.selectbox("Entorno", ["sandbox (pruebas)", "prod (real)"], index=0 if (acc.get("environment") or "sandbox") == "sandbox" else 1, key="env_tradier")
-            env_val = "sandbox" if "sandbox" in (env or "") else "prod"
-            cap = st.number_input("Capital ($)", value=float(acc.get("cap_total") or 100000), step=1000.0, format="%.2f", key="cap_mi_cuenta")
-            target = st.number_input("Meta anual (%)", value=float(acc.get("target_ann") or 20), step=0.5, format="%.2f", key="target_mi_cuenta")
-            max_ticker = st.number_input("Máx. por ticker (%)", value=float(acc.get("max_per_ticker") or 10), step=0.5, format="%.2f", key="max_ticker_mi_cuenta")
-            if st.button("Guardar token y datos"):
-                db.update_account_token(account_id, user_id, new_token or "", env_val)
-                db.update_account_config(account_id, user_id, cap, target, max_ticker)
-                for k in ["token_mi_cuenta", "cap_mi_cuenta", "target_mi_cuenta", "max_ticker_mi_cuenta"]:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.success("Guardado. Los datos de la cuenta y el token se han actualizado.")
-                st.rerun()
+            with st.form("form_mi_cuenta_guardar"):
+                st.caption("Si el navegador pregunta si guardar contraseña, puedes decir que no; el token se guarda en la app.")
+                new_token = st.text_input("Token de acceso (Tradier)", value=(acc.get("access_token") or ""), type="password", placeholder="Token Tradier", key="token_mi_cuenta")
+                env = st.selectbox("Entorno", ["sandbox (pruebas)", "prod (real)"], index=0 if (acc.get("environment") or "sandbox") == "sandbox" else 1, key="env_tradier")
+                env_val = "sandbox" if "sandbox" in (env or "") else "prod"
+                cap = st.number_input("Capital ($)", value=float(acc.get("cap_total") or 100000), step=1000.0, format="%.2f", key="cap_mi_cuenta")
+                target = st.number_input("Meta anual (%)", value=float(acc.get("target_ann") or 20), step=0.5, format="%.2f", key="target_mi_cuenta")
+                max_ticker = st.number_input("Máx. por ticker (%)", value=float(acc.get("max_per_ticker") or 10), step=0.5, format="%.2f", key="max_ticker_mi_cuenta")
+                submitted = st.form_submit_button("Guardar token y datos")
+            if submitted:
+                try:
+                    db.update_account_token(account_id, user_id, new_token or "", env_val)
+                    db.update_account_config(account_id, user_id, cap, target, max_ticker)
+                    st.success("Guardado. Los datos de la cuenta y el token se han actualizado.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo guardar: {e}")
             # Borrar cuenta: solo si hay más de una
             accounts_list = get_accounts_for_current_user()
             if len(accounts_list) > 1:
