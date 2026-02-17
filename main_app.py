@@ -1050,8 +1050,29 @@ with tab_dash:
                                 trade_date_opt_val = date.today()
                             c1, c2 = st.columns(2)
                             with c1:
-                                edit_strike = st.number_input("Strike", value=float(tr.get("strike") or 0), min_value=0.0, step=0.5, format="%.2f", key=f"edit_strike_{selected_trade_id}")
-                                edit_price = st.number_input("Prima por contrato", value=float(tr.get("price") or 0), min_value=0.0, step=0.01, format="%.2f", key=f"edit_price_{selected_trade_id}")
+                                edit_quantity = st.number_input(
+                                    "Contratos",
+                                    value=int(tr.get("quantity") or 0),
+                                    min_value=1,
+                                    step=1,
+                                    key=f"edit_qty_{selected_trade_id}",
+                                )
+                                edit_strike = st.number_input(
+                                    "Strike",
+                                    value=float(tr.get("strike") or 0),
+                                    min_value=0.0,
+                                    step=0.5,
+                                    format="%.2f",
+                                    key=f"edit_strike_{selected_trade_id}",
+                                )
+                                edit_price = st.number_input(
+                                    "Prima por contrato",
+                                    value=float(tr.get("price") or 0),
+                                    min_value=0.0,
+                                    step=0.01,
+                                    format="%.2f",
+                                    key=f"edit_price_{selected_trade_id}",
+                                )
                                 edit_trade_date_opt = st.date_input("Fecha inicio", value=trade_date_opt_val, key=f"trade_date_opt_{selected_trade_id}")
                             with c2:
                                 edit_exp = st.date_input("Expiración", value=exp_date_val, key=f"exp_date_{selected_trade_id}")
@@ -1065,11 +1086,27 @@ with tab_dash:
                                     elif not edit_price or edit_price <= 0:
                                         st.error("El precio por acción debe ser mayor que 0.")
                                     else:
-                                        db.update_trade(selected_trade_id, account_id, price=round2(edit_price), quantity=edit_quantity, trade_date=edit_trade_date.isoformat(), comment=edit_comment or None)
+                                        db.update_trade(
+                                            selected_trade_id,
+                                            account_id,
+                                            price=round2(edit_price),
+                                            quantity=edit_quantity,
+                                            trade_date=edit_trade_date.isoformat(),
+                                            comment=edit_comment or None,
+                                        )
                                         st.success("Cambios guardados.")
                                         st.rerun()
                                 else:
-                                    db.update_trade(selected_trade_id, account_id, price=round2(edit_price), strike=round2(edit_strike), expiration_date=edit_exp.isoformat(), trade_date=edit_trade_date_opt.isoformat(), comment=edit_comment or None)
+                                    db.update_trade(
+                                        selected_trade_id,
+                                        account_id,
+                                        price=round2(edit_price),
+                                        strike=round2(edit_strike),
+                                        quantity=edit_quantity,
+                                        expiration_date=edit_exp.isoformat(),
+                                        trade_date=edit_trade_date_opt.isoformat(),
+                                        comment=edit_comment or None,
+                                    )
                                     st.success("Cambios guardados.")
                                     st.rerun()
                         with col_del:
