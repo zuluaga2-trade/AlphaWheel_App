@@ -1614,8 +1614,14 @@ def run():
                         except (ValueError, TypeError):
                             dias_posicion = 0
                     roc = calculate_return_on_capital(prems, collat) if collat else 0.0
-                    dias_num = dias_posicion if isinstance(dias_posicion, int) and dias_posicion > 0 else dte
-                    ann_ret = calculate_annualized_return(roc, dias_num) if dias_num else 0.0
+                    # Anualizado: días desde inicio de campaña hasta expiración (no DTE desde hoy)
+                    try:
+                        d0 = datetime.strptime(str(open_date)[:10], "%Y-%m-%d").date()
+                        d1 = datetime.strptime(str(exp_date)[:10], "%Y-%m-%d").date()
+                        dias_para_anualizado = max(0, (d1 - d0).days)
+                    except (ValueError, TypeError):
+                        dias_para_anualizado = dte if dte and dte > 0 else 0
+                    ann_ret = calculate_annualized_return(roc, dias_para_anualizado) if dias_para_anualizado else 0.0
                     stock_qty = s.get("stock_quantity") or 0
                     net_cost_total = s.get("net_cost_basis_total") or 0
                     cost_per_share = (net_cost_total / max(1, stock_qty)) if stock_qty else 0
