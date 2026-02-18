@@ -364,10 +364,10 @@ def tax_efficiency_summary(
     """
     conn = db.get_conn()
     try:
-        # Trades cerrados en el rango (incl. close_type y buyback_debit para recompras)
+        # Trades cerrados en el rango. No usar close_type/buyback_debit en SELECT (pueden no existir en BD antigua).
         cur = conn.execute(
             """SELECT trade_id, ticker, asset_type, strategy_type, quantity, price, strike,
-                      trade_date, closed_date, entry_type, close_type, buyback_debit
+                      trade_date, closed_date, entry_type
                FROM Trade
                WHERE account_id = ?
                  AND status = 'CLOSED'
