@@ -39,11 +39,24 @@ def calculate_dte(exp_date) -> int:
         return 0
 
 
-def calculate_breakeven(strike: float, premiums_received: float, contracts: int, is_put: bool) -> float:
+def calculate_breakeven(
+    strike: float,
+    premiums_received: float,
+    contracts: int,
+    is_put: bool,
+    cost_basis_per_share: float = None,
+) -> float:
     """
     Breakeven para una posición de opciones.
+
     CSP: BE = strike - (primas / (contratos * 100))
-    CC:  BE = strike + (primas / (contratos * 100))
+        (precio de la acción al que no ganas ni pierdes si te asignan)
+
+    CC (Covered Call): si se pasa cost_basis_per_share (valor de compra neto por acción),
+        BE = cost_basis_per_share - (primas / (contratos * 100))
+        así se tiene en cuenta el precio de adquisición de las acciones y las primas
+        recibidas (CC + roll-overs) para un BE real. Si no hay cost basis, se usa
+        BE = strike + prima/acción (referencia al strike actual).
     """
     if not contracts or contracts <= 0:
         return round2(strike)
@@ -51,7 +64,11 @@ def calculate_breakeven(strike: float, premiums_received: float, contracts: int,
     if is_put:
         be = strike - premium_per_share
     else:
-        be = strike + premium_per_share
+        # Covered Call: BE real = coste neto por acción menos prima por acción
+        if cost_basis_per_share is not None and cost_basis_per_share > 0:
+            be = cost_basis_per_share - premium_per_share
+        else:
+            be = strike + premium_per_share
     return round2(be)
 
 

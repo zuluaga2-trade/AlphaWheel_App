@@ -642,7 +642,14 @@ with tab_dash:
                 contracts = s.get("option_contracts", 0) or 0
                 dte = calculate_dte(s.get("expiration_date"))
                 is_put = (s.get("strategy_type") or "").upper() in ("CSP", "PUT")
-                be = calculate_breakeven(strike or 0, prems, contracts, is_put) if strike else 0.0
+                stock_qty_s = s.get("stock_quantity") or 0
+                net_cost_s = s.get("net_cost_basis_total") or 0
+                cost_per_share_s = (net_cost_s / max(1, stock_qty_s)) if stock_qty_s else None
+                # CC: BE real = coste neto por acción - prima por acción (incluye rolls)
+                be = calculate_breakeven(
+                    strike or 0, prems, contracts, is_put,
+                    cost_basis_per_share=cost_per_share_s if not is_put and cost_per_share_s else None,
+                ) if strike else 0.0
                 zone = delta_approx_itm_otm(strike or 0, mkt, is_put) if strike else "—"
                 collat = (strike or 0) * 100 * contracts if is_put else (s.get("stock_cost_total") or 0)
                 alloc_pct = (collat / cap_total * 100) if cap_total else 0.0
