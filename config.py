@@ -24,9 +24,21 @@ def _get_database_url():
 DATABASE_URL = _get_database_url()
 
 # Restricción por email: solo estos usuarios pueden acceder (login y registro).
-# Variable de entorno ALPHAWHEEL_ALLOWED_EMAILS = emails separados por coma (ej. user1@mail.com,user2@mail.com).
+# Variable de entorno o Secrets (Streamlit Cloud): ALPHAWHEEL_ALLOWED_EMAILS = emails separados por coma.
 # Si está vacía o no definida, se permiten todos los emails (uso local / desarrollo).
-ALLOWED_EMAILS_RAW = os.environ.get("ALPHAWHEEL_ALLOWED_EMAILS", "").strip()
+def _get_allowed_emails_raw():
+    raw = os.environ.get("ALPHAWHEEL_ALLOWED_EMAILS", "").strip()
+    if raw:
+        return raw
+    try:
+        import streamlit as st
+        val = st.secrets.get("ALPHAWHEEL_ALLOWED_EMAILS")
+        return (val if isinstance(val, str) else "").strip()
+    except Exception:
+        return ""
+
+
+ALLOWED_EMAILS_RAW = _get_allowed_emails_raw()
 ALLOWED_EMAILS = frozenset(e.strip().lower() for e in ALLOWED_EMAILS_RAW.split(",") if e.strip()) if ALLOWED_EMAILS_RAW else None
 
 # Regla de precisión: máximo 2 decimales en todos los valores mostrados

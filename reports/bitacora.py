@@ -38,10 +38,12 @@ def _get_trades_for_report(
     """
     conn = db.get_conn()
     try:
+        # No seleccionar close_type ni buyback_debit: pueden no existir en BD antiguas (PostgreSQL).
+        # El enriquecimiento más abajo los deduce con r.get("close_type") / r.get("buyback_debit").
         base_sql = """
             SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
                    quantity, price, strike, expiration_date, status,
-                   entry_type, closed_date, close_type, buyback_debit, parent_trade_id, comment
+                   entry_type, closed_date, parent_trade_id, comment
             FROM Trade
             WHERE account_id = ?
               AND (
@@ -101,6 +103,25 @@ def _get_trades_for_report(
                 # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
                 r["total_usd"] = -round2(float(r["buyback_debit"]))
         return rows
+    finally:
+        conn.close()
+
+
+def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
+    """
+    Opciones ligeras para los filtros de reporte (tickers y estrategias).
+    Evita cargar todos los trades 1900-2100 y mejora la velocidad.
+    """
+    conn = db.get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT DISTINCT ticker, strategy_type FROM Trade WHERE account_id = ? ORDER BY ticker, strategy_type",
+            (account_id,),
+        )
+        rows = cur.fetchall()
+        tickers = sorted({(r.get("ticker") or "").strip() for r in rows if r.get("ticker")})
+        strategies = sorted({(r.get("strategy_type") or "").strip() for r in rows if r.get("strategy_type")})
+        return {"tickers": tickers, "strategies": strategies}
     finally:
         conn.close()
 

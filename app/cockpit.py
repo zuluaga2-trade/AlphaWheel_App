@@ -56,6 +56,7 @@ from reports.bitacora import (
     export_trades_pdf,
     tax_efficiency_summary,
     get_trades_for_report,
+    get_trade_filter_options,
 )
 from app.styles import PROFESSIONAL_CSS
 from app.session_helpers import (
@@ -2166,9 +2167,10 @@ def run():
             date_to_s = date_to.isoformat()
             account_name = acc_data.get("name", "")
 
-            # Filtros adicionales para construir la bitácora por campañas
-            all_trades_for_filters = get_trades_for_report(account_id, "1900-01-01", "2100-12-31")
-            tickers_for_filter = sorted({t["ticker"] for t in all_trades_for_filters}) if all_trades_for_filters else []
+            # Filtros: consulta ligera (solo tickers/estrategias) para no cargar todos los trades
+            filter_options = get_trade_filter_options(account_id)
+            tickers_for_filter = filter_options.get("tickers") or []
+            strategies_for_filter = filter_options.get("strategies") or []
             c_f1, c_f2, c_f3 = st.columns([1, 1, 1])
             with c_f1:
                 ticker_filter = st.selectbox(
@@ -2180,7 +2182,7 @@ def run():
             with c_f2:
                 strategy_filter = st.selectbox(
                     "Estrategia (opcional)",
-                    options=["", "CSP", "CC", "STOCK", "ASSIGNMENT"],
+                    options=[""] + (strategies_for_filter if strategies_for_filter else ["CSP", "CC", "STOCK", "ASSIGNMENT"]),
                     format_func=lambda x: x if x else "— Todas —",
                     key="report_strategy_filter",
                 )

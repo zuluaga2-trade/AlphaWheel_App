@@ -13,8 +13,7 @@ from database.db import init_db, get_user_by_email
 from auth.auth import login_user, register_user, is_logged_in, logout_user, get_last_login_email, set_last_login_email
 from app.styles import PROFESSIONAL_CSS
 
-init_db()
-
+# set_page_config debe ser la primera llamada a Streamlit (requisito de Streamlit)
 st.set_page_config(
     page_title="AlphaWheel Pro",
     layout="wide",
@@ -23,6 +22,14 @@ st.set_page_config(
     menu_items={"Get help": None, "Report a Bug": None, "About": None},
 )
 st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
+
+try:
+    init_db()
+except Exception as e:
+    st.error("No se pudo conectar a la base de datos. Si usas Streamlit Cloud, configura **ALPHAWHEEL_DATABASE_URL** en Secrets (PostgreSQL).")
+    with st.expander("Detalle del error"):
+        st.code(str(e))
+    st.stop()
 
 
 def render_login_register():

@@ -36,7 +36,7 @@ from business.wheel import (
     get_campaign_root_id,
     get_campaign_premiums,
 )
-from reports.bitacora import export_trades_csv, export_trades_excel, export_trades_pdf, tax_efficiency_summary, get_trades_for_report
+from reports.bitacora import export_trades_csv, export_trades_excel, export_trades_pdf, tax_efficiency_summary, get_trades_for_report, get_trade_filter_options
 from app.cockpit import render_screener_page, _render_screener_sidebar_form, _render_tutorial_tab
 import config
 
@@ -1283,9 +1283,10 @@ with tab_report:
         date_to_s = date_to.isoformat()
         account_name = acc_data.get("name", "")
 
-        # Filtros adicionales para la bitácora
-        all_trades_for_filters = get_trades_for_report(account_id, "1900-01-01", "2100-12-31")
-        tickers_for_filter = sorted({t["ticker"] for t in all_trades_for_filters}) if all_trades_for_filters else []
+        # Filtros: consulta ligera (solo tickers/estrategias) para no cargar todos los trades
+        filter_options = get_trade_filter_options(account_id)
+        tickers_for_filter = filter_options.get("tickers") or []
+        strategies_for_filter = filter_options.get("strategies") or []
         col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
         with col_f1:
             ticker_filter = st.selectbox(
@@ -1297,7 +1298,7 @@ with tab_report:
         with col_f2:
             strategy_filter = st.selectbox(
                 "Estrategia (opcional)",
-                options=["", "CSP", "CC", "STOCK", "ASSIGNMENT"],
+                options=[""] + (strategies_for_filter if strategies_for_filter else ["CSP", "CC", "STOCK", "ASSIGNMENT"]),
                 format_func=lambda x: x if x else "— Todas —",
                 key="report_strategy_filter",
             )
