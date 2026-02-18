@@ -35,12 +35,31 @@ def _get_trades_for_report(
     - Apertura en rango: trade_date >= date_from AND trade_date <= date_to
     - Cierre en rango: closed_date >= date_from AND closed_date <= date_to
     Así si cierras por recompra en febrero, el trade sale en el reporte de febrero.
+    Intenta primero con close_type y buyback_debit (para ver todas las recompras); si la BD no tiene esas columnas, usa consulta reducida.
     """
     conn = db.get_conn()
     try:
-        # No seleccionar close_type ni buyback_debit: pueden no existir en BD antiguas (PostgreSQL).
-        # El enriquecimiento más abajo los deduce con r.get("close_type") / r.get("buyback_debit").
-        base_sql = """
+        params = [account_id, date_from, date_to, date_from, date_to]
+        if ticker:
+            params.append(ticker.strip().upper())
+        if strategy:
+            params.append(strategy)
+        if status:
+            params.append(status)
+
+        # Consulta completa: incluye close_type y buyback_debit (recompras visibles en reporte y expander).
+        base_sql_full = """
+            SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
+                   quantity, price, strike, expiration_date, status,
+                   entry_type, closed_date, close_type, buyback_debit, parent_trade_id, comment
+            FROM Trade
+            WHERE account_id = ?
+              AND (
+                (trade_date >= ? AND trade_date <= ?)
+                OR (closed_date IS NOT NULL AND closed_date >= ? AND closed_date <= ?)
+              )
+        """
+        base_sql_reduced = """
             SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
                    quantity, price, strike, expiration_date, status,
                    entry_type, closed_date, parent_trade_id, comment
@@ -51,20 +70,27 @@ def _get_trades_for_report(
                 OR (closed_date IS NOT NULL AND closed_date >= ? AND closed_date <= ?)
               )
         """
-        params = [account_id, date_from, date_to, date_from, date_to]
+        filters = ""
         if ticker:
-            base_sql += " AND ticker = ?"
-            params.append(ticker.strip().upper())
+            filters += " AND ticker = ?"
         if strategy:
-            base_sql += " AND strategy_type = ?"
-            params.append(strategy)
+            filters += " AND strategy_type = ?"
         if status:
-            base_sql += " AND status = ?"
-            params.append(status)
-        base_sql += " ORDER BY trade_date, trade_id"
+            filters += " AND status = ?"
+        order_sql = " ORDER BY trade_date, trade_id"
 
-        cur = conn.execute(base_sql, params)
-        rows = [dict(r) for r in cur.fetchall()]
+        base_sql = base_sql_full
+        try:
+            cur = conn.execute(base_sql + filters + order_sql, params)
+            rows = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "close_type" in err_msg or "buyback_debit" in err_msg or "undefinedcolumn" in err_msg or "no such column" in err_msg:
+                base_sql = base_sql_reduced
+                cur = conn.execute(base_sql + filters + order_sql, params)
+                rows = [dict(r) for r in cur.fetchall()]
+            else:
+                raise
 
         # Enriquecer: campaña + total USD (convención opciones: 1 contrato = 100, total = precio × 100 × contratos)
         for r in rows:
@@ -118,7 +144,7 @@ def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
             "SELECT DISTINCT ticker, strategy_type FROM Trade WHERE account_id = ? ORDER BY ticker, strategy_type",
             (account_id,),
         )
-        rows = cur.fetchall()
+        rows = [dict(r) for r in cur.fetchall()]
         tickers = sorted({(r.get("ticker") or "").strip() for r in rows if r.get("ticker")})
         strategies = sorted({(r.get("strategy_type") or "").strip() for r in rows if r.get("strategy_type")})
         return {"tickers": tickers, "strategies": strategies}
