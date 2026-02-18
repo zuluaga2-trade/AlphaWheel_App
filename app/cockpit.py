@@ -1648,6 +1648,8 @@ def run():
                     else:
                         estrategia_label = estrategia_raw
                     acciones_libres = get_stock_quantity(account_id, ticker)
+                    # Costo real por acción (promedio si hay varias compras): (pagado/asignación − primas − dividendos + ajustes) / acciones
+                    costo_real_acc = round2(cost_per_share) if stock_qty and cost_per_share else None
                     rows.append({
                         "Activo": ticker,
                         "Estrategia": estrategia_label,
@@ -1660,6 +1662,7 @@ def run():
                         "Strike": round2(strike) if strike else "—",
                         "Prima recibida": round2(prems),
                         "Breakeven": round2(be),
+                        "Costo real ($/acc)": costo_real_acc if costo_real_acc is not None else "—",
                         "Diagnostico": diagnostico,
                         "Retorno": round2(roc),
                         "Anualizado": round2(ann_ret),
@@ -1845,7 +1848,8 @@ def run():
 
                 # --- Posiciones abiertas ---
                 st.markdown('<div class="dashboard-card"><h3>Posiciones abiertas</h3>', unsafe_allow_html=True)
-                table_cols = ["Activo", "Estrategia", "Contratos", "Acciones libres", "Fecha inicio", "Fecha exp.", "Días posición", "Precio MKT", "Strike", "Prima recibida", "Breakeven", "Diagnostico", "Retorno", "Anualizado", "POP"]
+                st.caption("**Costo real**: coste neto por acción (promedio si hay varias compras/asignaciones): lo pagado menos primas CSP/CC y dividendos. Solo en filas con acciones (Propias, Propias+CC).")
+                table_cols = ["Activo", "Estrategia", "Contratos", "Acciones libres", "Fecha inicio", "Fecha exp.", "Días posición", "Precio MKT", "Strike", "Prima recibida", "Breakeven", "Costo real ($/acc)", "Diagnostico", "Retorno", "Anualizado", "POP"]
                 df_show = df_dash[[c for c in table_cols if c in df_dash.columns]].copy()
                 # Asegurar columnas numéricas para PyArrow (evitar ArrowInvalid: no convertir '-' a int64)
                 if "Días posición" in df_show.columns:
@@ -1854,7 +1858,7 @@ def run():
                     df_show["Contratos"] = pd.to_numeric(df_show["Contratos"], errors="coerce").fillna(0).astype(int)
                 if "Acciones libres" in df_show.columns:
                     df_show["Acciones libres"] = pd.to_numeric(df_show["Acciones libres"], errors="coerce").fillna(0).astype(int)
-                for col in ["Precio MKT", "Strike", "Prima recibida", "Breakeven"]:
+                for col in ["Precio MKT", "Strike", "Prima recibida", "Breakeven", "Costo real ($/acc)"]:
                     if col in df_show.columns:
                         df_show[col] = df_show[col].apply(lambda x: fmt2(x) if x is not None and not isinstance(x, str) else ("—" if x == "—" or x is None else str(x)))
                 for col in ["Retorno", "Anualizado"]:
