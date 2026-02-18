@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS Trade (
     entry_type TEXT NOT NULL CHECK (entry_type IN ('OPENING', 'ASSIGNMENT', 'DIRECT_PURCHASE', 'CLOSING')),
     trade_date TEXT NOT NULL,
     closed_date TEXT,
+    close_type TEXT,
+    buyback_debit REAL,
     parent_trade_id INTEGER REFERENCES Trade(trade_id),
     comment TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
@@ -84,6 +86,14 @@ CREATE TABLE IF NOT EXISTS UserBunker (
     tickers_text TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE(user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS CampaignAdjustment (
+    account_id INTEGER NOT NULL REFERENCES Account(account_id),
+    campaign_root_id INTEGER NOT NULL REFERENCES Trade(trade_id),
+    commissions REAL DEFAULT 0,
+    fees REAL DEFAULT 0,
+    PRIMARY KEY (account_id, campaign_root_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_account_user ON Account(user_id);

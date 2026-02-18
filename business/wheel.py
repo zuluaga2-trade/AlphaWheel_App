@@ -203,19 +203,94 @@ def register_adjustment(
     )
 
 
-def get_campaign_premiums(account_id: int, trade_id: int) -> float:
-    """
-    Suma de primas de toda la campaña: este trade + todos los ancestros (parent_trade_id).
-    Así al hacer roll-over las primas se acumulan y el historial se conserva.
-    """
-    total = 0.0
+def _campaign_trade_ids(account_id: int, trade_id: int) -> set:
+    """Trade IDs de la campaña: desde trade_id hasta la raíz + todos los descendientes (p. ej. recompra)."""
+    chain_ids = set()
     t = db.get_trade_by_id(account_id, trade_id)
     while t:
-        if t.get("asset_type") == "OPTION":
+        chain_ids.add(t["trade_id"])
+        t = db.get_trade_by_id(account_id, t.get("parent_trade_id")) if t.get("parent_trade_id") else None
+    all_trades = db.get_trades_by_account(account_id)
+    while True:
+        added = False
+        for t in all_trades:
+            if t["trade_id"] not in chain_ids and t.get("parent_trade_id") in chain_ids:
+                chain_ids.add(t["trade_id"])
+                added = True
+        if not added:
+            break
+    return chain_ids
+
+
+def get_campaign_premiums(account_id: int, trade_id: int) -> float:
+    """
+    Suma de primas de toda la campaña: aperturas (positivo) y cierres por recompra (negativo).
+    Incluye este trade, ancestros (parent_trade_id) y descendientes (p. ej. trade de recompra).
+    Si un trade tiene close_type='buyback' y buyback_debit, se resta del total (formato antiguo).
+    Resta también comisiones y fees de la campaña (CampaignAdjustment).
+    """
+    campaign_ids = _campaign_trade_ids(account_id, trade_id)
+    all_trades = db.get_trades_by_account(account_id)
+    total = 0.0
+    for t in all_trades:
+        if t["trade_id"] not in campaign_ids:
+            continue
+        if (t.get("asset_type") or "").upper() != "OPTION":
+            continue
+        # Recompra: usar buyback_debit si está en BD (precisión); si no, price*qty*100 (price negativo)
+        if (t.get("close_type") or "").lower() == "buyback" and t.get("buyback_debit") is not None:
+            total -= safe_float(t.get("buyback_debit"))
+        else:
             total += safe_float(t.get("price")) * int(t.get("quantity", 0)) * 100
-        pid = t.get("parent_trade_id")
-        t = db.get_trade_by_id(account_id, pid) if pid else None
+    root_id = get_campaign_root_id(account_id, trade_id)
+    if root_id:
+        adj = db.get_campaign_adjustment(account_id, root_id)
+        total -= safe_float(adj.get("commissions", 0)) + safe_float(adj.get("fees", 0))
     return round2(total)
+
+
+def close_trade_by_buyback(account_id: int, trade_id: int, closed_date: str, buyback_debit: float) -> Optional[int]:
+    """
+    Cierra una opción (CSP/CC) por recompra: registra la recompra como un movimiento más
+    en la campaña (nuevo trade con entry_type=CLOSING y price negativo) y cierra el trade original.
+    El débito resta de las primas totales de la campaña (get_campaign_premiums).
+
+    buyback_debit = total en USD pagado por recomprar (mismo criterio que prima: total = precio_por_acción × 100 × contratos).
+    Ej: 0.02 $/acción y 2 contratos → total = 4 $.
+
+    Devuelve el trade_id del nuevo trade de recompra o None si falla.
+    """
+    t = db.get_trade_by_id(account_id, trade_id)
+    if not t or (t.get("status") or "").upper() != "OPEN" or (t.get("asset_type") or "").upper() != "OPTION":
+        return None
+    qty = int(t.get("quantity") or 0)
+    if qty <= 0:
+        return None
+    debit = safe_float(buyback_debit)
+    # Precio por acción (negativo = débito): total / (100 × contratos)
+    price_per_contract = -(debit / (qty * 100))
+    price_stored = round(price_per_contract, 6) if price_per_contract else 0.0
+    recompra_id = db.insert_trade(
+        account_id=account_id,
+        ticker=t["ticker"],
+        asset_type="OPTION",
+        quantity=qty,
+        price=price_stored,
+        strike=t.get("strike"),
+        expiration_date=t.get("expiration_date"),
+        strategy_type=t.get("strategy_type") or "CSP",
+        status="CLOSED",
+        entry_type="CLOSING",
+        trade_date=closed_date,
+        closed_date=closed_date,
+        parent_trade_id=trade_id,
+        comment="Recompra",
+    )
+    # Persistir débito en BD para no perder precisión y que reportes/cálculos lo usen
+    if recompra_id:
+        db.set_trade_buyback(recompra_id, account_id, debit)
+    db.close_trade(trade_id, account_id, closed_date)
+    return recompra_id
 
 
 def get_stock_quantity(account_id: int, ticker: str) -> int:

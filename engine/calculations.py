@@ -86,6 +86,16 @@ def calculate_annualized_return(roc_pct: float, dte: int) -> float:
         return round2(0.0)
 
 
+def realized_pnl_buyback(premium_received_total: float, buyback_debit: float) -> float:
+    """
+    P&L realizado al cerrar una opción (CSP/CC) por recompra.
+    premium_received_total = prima total recibida al abrir (price * quantity * 100).
+    buyback_debit = importe total pagado por recomprar la opción.
+    Devuelve: prima recibida - débito (positivo = ganancia, negativo = pérdida).
+    """
+    return round2(safe_float(premium_received_total) - safe_float(buyback_debit))
+
+
 def calculate_return_on_capital(return_usd: float, capital_used: float) -> float:
     """Retorno sobre capital (porcentaje): (return_usd / capital_used) * 100. Si capital_used <= 0, devuelve 0."""
     if capital_used is None or capital_used <= 0:

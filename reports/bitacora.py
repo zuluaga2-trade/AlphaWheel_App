@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 import pandas as pd
 from database import db
-from engine.calculations import round2
+from engine.calculations import round2, safe_float
 from business.wheel import get_campaign_root_id, get_campaign_start_date
 
 
@@ -31,26 +31,25 @@ def _get_trades_for_report(
     status: Optional[str] = None,
 ) -> List[Dict]:
     """
-    Trades con trade_date en el rango (apertura en periodo).
-    Incluye closed_date para bitácora.
-
-    Filtros opcionales:
-    - ticker: solo ese símbolo
-    - strategy: por tipo de estrategia (CSP, CC, STOCK, ASSIGNMENT, etc.)
-    - status: 'OPEN' o 'CLOSED'
+    Trades que abrieron O cerraron en el rango (para ver campaña completa).
+    - Apertura en rango: trade_date >= date_from AND trade_date <= date_to
+    - Cierre en rango: closed_date >= date_from AND closed_date <= date_to
+    Así si cierras por recompra en febrero, el trade sale en el reporte de febrero.
     """
     conn = db.get_conn()
     try:
         base_sql = """
             SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
                    quantity, price, strike, expiration_date, status,
-                   entry_type, closed_date, comment
+                   entry_type, closed_date, close_type, buyback_debit, parent_trade_id, comment
             FROM Trade
             WHERE account_id = ?
-              AND trade_date >= ?
-              AND trade_date <= ?
+              AND (
+                (trade_date >= ? AND trade_date <= ?)
+                OR (closed_date IS NOT NULL AND closed_date >= ? AND closed_date <= ?)
+              )
         """
-        params = [account_id, date_from, date_to]
+        params = [account_id, date_from, date_to, date_from, date_to]
         if ticker:
             base_sql += " AND ticker = ?"
             params.append(ticker.strip().upper())
@@ -65,13 +64,42 @@ def _get_trades_for_report(
         cur = conn.execute(base_sql, params)
         rows = [dict(r) for r in cur.fetchall()]
 
-        # Enriquecer con información de campaña (wheel)
+        # Enriquecer: campaña + total USD (convención opciones: 1 contrato = 100, total = precio × 100 × contratos)
         for r in rows:
             root_id = get_campaign_root_id(account_id, r["trade_id"])
             r["campaign_root_id"] = root_id
             r["campaign_start_date"] = (
                 get_campaign_start_date(account_id, r["trade_id"]) if root_id else None
             )
+            atype = (r.get("asset_type") or "").strip().upper()
+            qty = int(r.get("quantity") or 0)
+            # No usar safe_float(price): redondea a 2 decimales y anula débitos pequeños (ej. 0.02 → price -0.0001 → 0)
+            try:
+                p_raw = float(r.get("price")) if r.get("price") is not None else 0.0
+            except (TypeError, ValueError):
+                p_raw = 0.0
+            # Total en USD: opciones = precio × 100 × contratos (prima positiva, débito negativo); acciones = precio × cantidad
+            mult = 100 if atype == "OPTION" else 1
+            r["total_usd"] = round2(p_raw * qty * mult)
+
+            # Recompra: trade de cierre. Débito = precio por acción × 100 × contratos (como la prima). Preferir BD; si no, derivar.
+            entry = (r.get("entry_type") or "").strip().upper()
+            is_closing = (
+                entry == "CLOSING"
+                or (r.get("parent_trade_id") and atype == "OPTION" and p_raw <= 0)
+                or (atype == "OPTION" and p_raw < 0)
+            )
+            if is_closing and atype == "OPTION":
+                r["close_type"] = r.get("close_type") or "buyback"
+                if r.get("buyback_debit") is not None:
+                    try:
+                        r["buyback_debit"] = round2(float(r["buyback_debit"]))
+                    except (TypeError, ValueError):
+                        r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else 0.0
+                else:
+                    r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else round2(abs(r["total_usd"]))
+                # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
+                r["total_usd"] = -round2(float(r["buyback_debit"]))
         return rows
     finally:
         conn.close()
@@ -134,13 +162,23 @@ def export_trades_excel(
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Trades"
-        ws.append(["Fecha", "Ticker", "Activo_tipo", "Estrategia", "Cantidad", "Prima_por_contrato", "Strike", "Fecha_exp", "Estado", "Fecha_cierre", "Tipo_entrada", "Comentario"])
+        ws.append(["Fecha", "Ticker", "Activo_tipo", "Estrategia", "Cantidad", "Precio_por_accion", "Total_USD", "Strike", "Fecha_exp", "Estado", "Fecha_cierre", "Tipo_entrada", "Debito_recompra", "Comentario"])
         wb.save(buf)
         return buf.getvalue()
 
-    # Hoja Trades: columnas estándar para poder combinar con otras hojas
+    # Hoja Trades: Total_USD = precio × 100 × contratos (opciones) o precio × cantidad (stock). Débito resta (negativo en Total_USD).
     data = []
     for r in rows:
+        total_usd = r.get("total_usd")
+        if total_usd is None:
+            atype = (r.get("asset_type") or "").strip().upper()
+            qty = int(r.get("quantity") or 0)
+            p = safe_float(r.get("price"))
+            total_usd = round2(p * qty * (100 if atype == "OPTION" else 1))
+        is_recompra = (r.get("close_type") or "").lower() == "buyback" or ((r.get("entry_type") or "").upper() == "CLOSING" and (r.get("asset_type") or "").upper() == "OPTION")
+        debito = r.get("buyback_debit") if is_recompra else ""
+        if debito is not None and debito != "":
+            debito = round2(float(debito))
         data.append([
             str(r.get("trade_date", ""))[:10],
             str(r.get("ticker", "")),
@@ -148,26 +186,28 @@ def export_trades_excel(
             str(r.get("strategy_type", "")),
             int(r.get("quantity", 0)),
             round2(r.get("price")),
+            total_usd,
             round2(r.get("strike")) if r.get("strike") is not None else "",
             str(r.get("expiration_date") or "")[:10],
             str(r.get("status", "")),
             str(r.get("closed_date") or "")[:10],
             str(r.get("entry_type", "")),
+            debito if debito != "" else "",
             (r.get("comment") or "")[:200],
         ])
     df_trades = pd.DataFrame(data, columns=[
-        "Fecha", "Ticker", "Activo_tipo", "Estrategia", "Cantidad", "Prima_por_contrato",
-        "Strike", "Fecha_exp", "Estado", "Fecha_cierre", "Tipo_entrada", "Comentario"
+        "Fecha", "Ticker", "Activo_tipo", "Estrategia", "Cantidad", "Precio_por_accion", "Total_USD",
+        "Strike", "Fecha_exp", "Estado", "Fecha_cierre", "Tipo_entrada", "Debito_recompra", "Comentario"
     ])
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df_trades.to_excel(writer, sheet_name="Trades", index=False)
-        # Resumen por ticker y por estrategia (para juntar con otras hojas)
+        # Resumen: Prima_total = suma de Total_USD (débitos ya vienen negativos, netean)
         resumen_ticker = df_trades.groupby("Ticker").apply(
             lambda g: pd.Series({
                 "Cantidad_trades": len(g),
-                "Prima_total": (g["Prima_por_contrato"] * g["Cantidad"] * 100).sum(),
+                "Prima_neto_USD": g["Total_USD"].sum(),
             })
         ).reset_index()
         resumen_estrategia = df_trades.groupby("Estrategia").agg(
@@ -224,15 +264,25 @@ def export_trades_pdf(
     if not rows:
         story.append(Paragraph("No hay trades en este rango de fechas.", styles["Normal"]))
     else:
-        data = [["Fecha", "Ticker", "Tipo", "Estrategia", "Cant", "Prima", "Strike", "Exp", "Estado", "Cierre", "Entrada", "Comentario"]]
+        # Prima/Débito en total USD: precio × 100 × contratos (misma fórmula; débito resta)
+        data = [["Fecha", "Ticker", "Tipo", "Estrategia", "Cant", "Prima (USD)", "Débito (USD)", "Strike", "Exp", "Estado", "Cierre", "Entrada", "Comentario"]]
         for r in rows:
+            total_usd = r.get("total_usd")
+            if total_usd is None:
+                atype = (r.get("asset_type") or "").strip().upper()
+                qty = int(r.get("quantity") or 0)
+                total_usd = round2(safe_float(r.get("price")) * qty * (100 if atype == "OPTION" else 1))
+            is_recompra = (r.get("close_type") or "").lower() == "buyback" or ((r.get("entry_type") or "").upper() == "CLOSING" and (r.get("asset_type") or "").upper() == "OPTION")
+            prima_cell = str(round2(total_usd)) if not is_recompra and total_usd is not None else "-"
+            debito_cell = str(round2(r.get("buyback_debit"))) if is_recompra and r.get("buyback_debit") is not None else "-"
             data.append([
                 str(r.get("trade_date", ""))[:10],
                 str(r.get("ticker", "")),
                 str(r.get("asset_type", "")),
                 str(r.get("strategy_type", "")),
                 str(r.get("quantity", "")),
-                str(round2(r.get("price"))),
+                prima_cell,
+                debito_cell,
                 str(round2(r.get("strike")) if r.get("strike") is not None else "-"),
                 str(r.get("expiration_date") or "-")[:10],
                 str(r.get("status", "")),
@@ -240,7 +290,7 @@ def export_trades_pdf(
                 str(r.get("entry_type", "")),
                 (r.get("comment") or "")[:25],
             ])
-        t = Table(data, colWidths=[52, 44, 36, 52, 28, 44, 44, 52, 36, 52, 44, 80])
+        t = Table(data, colWidths=[48, 40, 32, 48, 24, 44, 44, 40, 48, 32, 48, 40, 72])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -265,10 +315,18 @@ def _pdf_fpdf(account_id: int, date_from: str, date_to: str, account_name: str) 
     pdf.ln(6)
     if rows:
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(22, 6, "Fecha"); pdf.cell(18, 6, "Ticker"); pdf.cell(14, 6, "Tipo"); pdf.cell(14, 6, "Cant"); pdf.cell(18, 6, "Prima"); pdf.cell(18, 6, "Strike"); pdf.cell(22, 6, "Exp"); pdf.cell(14, 6, "Estado"); pdf.cell(22, 6, "Cierre"); pdf.ln()
+        pdf.cell(20, 6, "Fecha"); pdf.cell(16, 6, "Ticker"); pdf.cell(12, 6, "Tipo"); pdf.cell(12, 6, "Cant"); pdf.cell(18, 6, "Prima USD"); pdf.cell(18, 6, "Debito USD"); pdf.cell(16, 6, "Strike"); pdf.cell(20, 6, "Exp"); pdf.cell(12, 6, "Estado"); pdf.cell(20, 6, "Cierre"); pdf.ln()
         pdf.set_font("Helvetica", "", 7)
         for r in rows:
-            pdf.cell(22, 5, str(r.get("trade_date", ""))[:10]); pdf.cell(18, 5, str(r.get("ticker", ""))); pdf.cell(14, 5, str(r.get("asset_type", ""))); pdf.cell(14, 5, str(r.get("quantity", ""))); pdf.cell(18, 5, str(round2(r.get("price")))); pdf.cell(18, 5, str(round2(r.get("strike")) if r.get("strike") else "-")); pdf.cell(22, 5, str(r.get("expiration_date") or "-")[:10]); pdf.cell(14, 5, str(r.get("status", ""))); pdf.cell(22, 5, str(r.get("closed_date") or "-")[:10]); pdf.ln()
+            total_usd = r.get("total_usd")
+            if total_usd is None:
+                atype = (r.get("asset_type") or "").strip().upper()
+                qty = int(r.get("quantity") or 0)
+                total_usd = round2(safe_float(r.get("price")) * qty * (100 if atype == "OPTION" else 1))
+            is_recompra = (r.get("close_type") or "").lower() == "buyback" or ((r.get("entry_type") or "").upper() == "CLOSING" and (r.get("asset_type") or "").upper() == "OPTION")
+            prima_str = str(round2(total_usd)) if not is_recompra else "-"
+            debito_str = str(round2(r.get("buyback_debit"))) if is_recompra and r.get("buyback_debit") is not None else "-"
+            pdf.cell(20, 5, str(r.get("trade_date", ""))[:10]); pdf.cell(16, 5, str(r.get("ticker", ""))); pdf.cell(12, 5, str(r.get("asset_type", ""))); pdf.cell(12, 5, str(r.get("quantity", ""))); pdf.cell(18, 5, prima_str); pdf.cell(18, 5, debito_str); pdf.cell(16, 5, str(round2(r.get("strike")) if r.get("strike") else "-")); pdf.cell(20, 5, str(r.get("expiration_date") or "-")[:10]); pdf.cell(12, 5, str(r.get("status", ""))); pdf.cell(20, 5, str(r.get("closed_date") or "-")[:10]); pdf.ln()
     buf = io.BytesIO()
     pdf.output(buf)
     return buf.getvalue()
@@ -285,10 +343,10 @@ def tax_efficiency_summary(
     """
     conn = db.get_conn()
     try:
-        # Trades cerrados en el rango
+        # Trades cerrados en el rango (incl. close_type y buyback_debit para recompras)
         cur = conn.execute(
             """SELECT trade_id, ticker, asset_type, strategy_type, quantity, price, strike,
-                      trade_date, closed_date, entry_type
+                      trade_date, closed_date, entry_type, close_type, buyback_debit
                FROM Trade
                WHERE account_id = ?
                  AND status = 'CLOSED'
@@ -315,21 +373,29 @@ def tax_efficiency_summary(
     closed_by_strategy: Dict[str, int] = {}
 
     for r in rows:
-        # Aproximación: para opciones, P&L ≈ (premium recibido - premium pagado) * 100 * qty;
-        # para stock, (precio venta - cost) * qty. Aquí usamos un modelo sencillo:
-        # sumamos precio*quantity*mult (100 para opciones) con signo según entry_type.
+        # P&L por trade: prima recibida (positivo) o débito recompra (negativo). Preferir buyback_debit si está en BD (precisión).
         mult = 100 if r["asset_type"] == "OPTION" else 1
-        amt = float(r["price"]) * int(r["quantity"]) * mult
-        if r["entry_type"] == "CLOSING":
-            total_realized -= amt
+        if (r.get("close_type") or "").lower() == "buyback" and r.get("buyback_debit") is not None:
+            amt = -float(r["buyback_debit"])
         else:
-            total_realized += amt
+            amt = float(r["price"]) * int(r["quantity"]) * mult
+        total_realized += amt
 
         tk = r["ticker"]
         strat = r.get("strategy_type") or "OTHER"
         by_ticker[tk] = by_ticker.get(tk, 0.0) + amt
         by_strategy[strat] = by_strategy.get(strat, 0.0) + amt
         closed_by_strategy[strat] = closed_by_strategy.get(strat, 0) + 1
+
+    # Restar comisiones y fees por campaña (una vez por campaña cerrada en el rango)
+    campaign_roots = set()
+    for r in rows:
+        root_id = get_campaign_root_id(account_id, r["trade_id"])
+        if root_id:
+            campaign_roots.add(root_id)
+    for root_id in campaign_roots:
+        adj = db.get_campaign_adjustment(account_id, root_id)
+        total_realized -= safe_float(adj.get("commissions", 0)) + safe_float(adj.get("fees", 0))
 
     total_realized = round2(total_realized)
     realized_pct_of_capital = round2((total_realized / cap_total * 100) if cap_total else 0.0)

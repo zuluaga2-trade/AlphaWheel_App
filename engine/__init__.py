@@ -7,6 +7,7 @@ from .calculations import (
     calculate_annualized_return,
     calculate_return_on_capital,
     net_cost_basis,
+    realized_pnl_buyback,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "calculate_annualized_return",
     "calculate_return_on_capital",
     "net_cost_basis",
+    "realized_pnl_buyback",
 ]

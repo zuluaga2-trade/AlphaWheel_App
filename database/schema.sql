@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS Trade (
     entry_type TEXT NOT NULL CHECK (entry_type IN ('OPENING', 'ASSIGNMENT', 'DIRECT_PURCHASE', 'CLOSING')),
     trade_date TEXT NOT NULL,
     closed_date TEXT,
+    close_type TEXT,
+    buyback_debit REAL,
     parent_trade_id INTEGER,
     comment TEXT,
     created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -85,6 +87,17 @@ CREATE TABLE IF NOT EXISTS TradeComment (
     body TEXT NOT NULL,
     created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     FOREIGN KEY (trade_id) REFERENCES Trade(trade_id)
+);
+
+-- Ajustes por campaña: comisiones broker y fees (restan del neto de la campaña)
+CREATE TABLE IF NOT EXISTS CampaignAdjustment (
+    account_id INTEGER NOT NULL,
+    campaign_root_id INTEGER NOT NULL,
+    commissions REAL DEFAULT 0,
+    fees REAL DEFAULT 0,
+    PRIMARY KEY (account_id, campaign_root_id),
+    FOREIGN KEY (account_id) REFERENCES Account(account_id),
+    FOREIGN KEY (campaign_root_id) REFERENCES Trade(trade_id)
 );
 
 -- Índices para filtrado por usuario/cuenta

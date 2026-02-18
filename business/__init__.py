@@ -7,6 +7,7 @@ from .wheel import (
     register_dividend,
     register_adjustment,
     get_position_summary,
+    close_trade_by_buyback,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "register_dividend",
     "register_adjustment",
     "get_position_summary",
+    "close_trade_by_buyback",
 ]

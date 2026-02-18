@@ -183,6 +183,12 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE Trade ADD COLUMN IF NOT EXISTS close_type TEXT")
+                conn.execute("ALTER TABLE Trade ADD COLUMN IF NOT EXISTS buyback_debit REAL")
+                conn.commit()
+            except Exception:
+                pass
         finally:
             conn.close()
         return
@@ -216,6 +222,16 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE Trade ADD COLUMN close_type TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE Trade ADD COLUMN buyback_debit REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS UserBunker (
                 bunker_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,6 +241,17 @@ def init_db():
                 created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 UNIQUE(user_id, name),
                 FOREIGN KEY (user_id) REFERENCES User(user_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS CampaignAdjustment (
+                account_id INTEGER NOT NULL,
+                campaign_root_id INTEGER NOT NULL,
+                commissions REAL DEFAULT 0,
+                fees REAL DEFAULT 0,
+                PRIMARY KEY (account_id, campaign_root_id),
+                FOREIGN KEY (account_id) REFERENCES Account(account_id),
+                FOREIGN KEY (campaign_root_id) REFERENCES Trade(trade_id)
             )
         """)
         conn.commit()
@@ -816,13 +843,23 @@ def insert_trade(account_id: int, ticker: str, asset_type: str, quantity: int, p
     finally:
         conn.close()
 
-def close_trade(trade_id: int, account_id: int, closed_date: str):
+def close_trade(trade_id: int, account_id: int, closed_date: str, buyback_debit: float = None):
+    """
+    Cierra un trade (CSP/CC o otro). Si buyback_debit es distinto de None, se registra cierre por recompra:
+    close_type='buyback' y buyback_debit=importe pagado. Resultado: CSP → cash; CC → acciones libres.
+    """
     conn = get_conn()
     try:
-        conn.execute(
-            "UPDATE Trade SET status = 'CLOSED', closed_date = ? WHERE trade_id = ? AND account_id = ?",
-            (closed_date, trade_id, account_id),
-        )
+        if buyback_debit is not None:
+            conn.execute(
+                "UPDATE Trade SET status = 'CLOSED', closed_date = ?, close_type = 'buyback', buyback_debit = ? WHERE trade_id = ? AND account_id = ?",
+                (closed_date, round(float(buyback_debit), 2), trade_id, account_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE Trade SET status = 'CLOSED', closed_date = ? WHERE trade_id = ? AND account_id = ?",
+                (closed_date, trade_id, account_id),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -858,6 +895,115 @@ def update_trade(trade_id: int, account_id: int, price: float = None, strike: fl
         conn.execute(
             f"UPDATE Trade SET {', '.join(updates)} WHERE trade_id = ? AND account_id = ?",
             params,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_trade_buyback(trade_id: int, account_id: int, buyback_debit: float) -> None:
+    """Registra en un trade (p. ej. recompra) close_type='buyback' y el débito pagado. Evita perder precisión en débitos pequeños."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE Trade SET close_type = 'buyback', buyback_debit = %s WHERE trade_id = %s AND account_id = %s",
+                (round(float(buyback_debit), 2), trade_id, account_id),
+            )
+        finally:
+            conn.close()
+        return
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE Trade SET close_type = 'buyback', buyback_debit = ? WHERE trade_id = ? AND account_id = ?",
+            (round(float(buyback_debit), 2), trade_id, account_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# --- Ajustes por campaña (comisiones y fees) ---
+def _ensure_campaign_adjustment_table(conn):
+    """Crea la tabla CampaignAdjustment si no existe (PostgreSQL puede no tenerla en schema inicial)."""
+    if _is_postgres() and psycopg2:
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS CampaignAdjustment (
+                    account_id INTEGER NOT NULL REFERENCES Account(account_id),
+                    campaign_root_id INTEGER NOT NULL REFERENCES Trade(trade_id),
+                    commissions REAL DEFAULT 0,
+                    fees REAL DEFAULT 0,
+                    PRIMARY KEY (account_id, campaign_root_id)
+                )
+            """)
+        except Exception:
+            pass
+
+
+def get_campaign_adjustment(account_id: int, campaign_root_id: int):
+    """Devuelve {commissions, fees} para la campaña, o {commissions: 0, fees: 0} si no hay registro."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            _ensure_campaign_adjustment_table(conn)
+            cur = conn.cursor(cursor_factory=pg_extras.RealDictCursor)
+            cur.execute(
+                "SELECT commissions, fees FROM CampaignAdjustment WHERE account_id = %s AND campaign_root_id = %s",
+                (account_id, campaign_root_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return {"commissions": float(row.get("commissions") or 0), "fees": float(row.get("fees") or 0)}
+            return {"commissions": 0.0, "fees": 0.0}
+        finally:
+            conn.close()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT commissions, fees FROM CampaignAdjustment WHERE account_id = ? AND campaign_root_id = ?",
+            (account_id, campaign_root_id),
+        )
+        row = cur.fetchone()
+        if row:
+            try:
+                return {"commissions": float(row.get("commissions") or 0), "fees": float(row.get("fees") or 0)}
+            except (TypeError, KeyError):
+                return {"commissions": float(row[0] or 0), "fees": float(row[1] or 0)}
+        return {"commissions": 0.0, "fees": 0.0}
+    finally:
+        conn.close()
+
+
+def upsert_campaign_adjustment(account_id: int, campaign_root_id: int, commissions: float = 0, fees: float = 0):
+    """Crea o actualiza comisiones y fees de la campaña."""
+    if _is_postgres():
+        conn = psycopg2.connect(config.DATABASE_URL)
+        conn.autocommit = True
+        try:
+            _ensure_campaign_adjustment_table(conn)
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO CampaignAdjustment (account_id, campaign_root_id, commissions, fees)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (account_id, campaign_root_id) DO UPDATE SET commissions = EXCLUDED.commissions, fees = EXCLUDED.fees""",
+                (account_id, campaign_root_id, round(float(commissions), 2), round(float(fees), 2)),
+            )
+        finally:
+            conn.close()
+        return
+    conn = get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO CampaignAdjustment (account_id, campaign_root_id, commissions, fees)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT (account_id, campaign_root_id) DO UPDATE SET commissions = excluded.commissions, fees = excluded.fees""",
+            (account_id, campaign_root_id, round(float(commissions), 2), round(float(fees), 2)),
         )
         conn.commit()
     finally:
