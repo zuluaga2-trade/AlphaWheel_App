@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 import pandas as pd
+import streamlit as st
 from database import db
 from engine.calculations import round2, safe_float
 from business.wheel import get_campaign_root_id, get_campaign_start_date
@@ -131,10 +132,11 @@ def _get_trades_for_report(
         conn.close()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
     """
     Opciones ligeras para los filtros de reporte (tickers y estrategias).
-    Evita cargar todos los trades 1900-2100 y mejora la velocidad.
+    Cache 2 min para no repetir consulta al cambiar solo filtros.
     """
     conn = db.get_conn()
     try:
@@ -150,6 +152,7 @@ def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
         conn.close()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def get_trades_for_report(
     account_id: int,
     date_from: str,
@@ -160,11 +163,7 @@ def get_trades_for_report(
 ) -> List[Dict]:
     """
     API pública: lista de trades en el rango para preview y reportes.
-
-    Filtros opcionales:
-    - ticker: solo un símbolo concreto
-    - strategy: CSP, CC, STOCK, ASSIGNMENT, etc.
-    - status: 'OPEN', 'CLOSED'
+    Cache 2 min para no repetir la misma consulta al cambiar solo la vista.
     """
     return _get_trades_for_report(account_id, date_from, date_to, ticker, strategy, status)
 
@@ -377,6 +376,7 @@ def _pdf_fpdf(account_id: int, date_from: str, date_to: str, account_name: str) 
     return buf.getvalue()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def tax_efficiency_summary(
     account_id: int,
     date_from: str,
@@ -384,7 +384,7 @@ def tax_efficiency_summary(
 ) -> Dict[str, Any]:
     """
     Resumen Tax Efficiency: ganancias/pérdidas cerradas en el rango.
-    Solo trades con status=CLOSED y closed_date en rango.
+    Cache 2 min para no repetir la misma consulta.
     """
     conn = db.get_conn()
     try:

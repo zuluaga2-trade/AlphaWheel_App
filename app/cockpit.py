@@ -70,6 +70,54 @@ from app.session_helpers import (
 from auth.auth import logout_user
 import config
 
+# Cache compartido Tradier (5 min): mismo ticker no se vuelve a consultar en la misma sesión/día
+_TRADIER_CACHE_TTL = 300  # segundos
+
+@st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
+def _cached_tradier_quote(symbol: str, api_base: str, token: str) -> dict:
+    if not (symbol and token):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/quotes",
+            params={"symbols": symbol},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
+@st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
+def _cached_tradier_expirations(symbol: str, api_base: str, token: str) -> dict:
+    if not (symbol and token):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/options/expirations",
+            params={"symbol": symbol},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
+@st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
+def _cached_tradier_chain(symbol: str, expiration: str, api_base: str, token: str) -> dict:
+    if not (symbol and expiration and token):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/options/chains",
+            params={"symbol": symbol, "expiration": expiration, "greeks": "true"},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
 
 def _get_tradier_token_for_user(user_id: int) -> tuple:
     """Devuelve (token, environment) de la primera cuenta del usuario con token; (None, None) si no hay."""
@@ -815,31 +863,15 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
         for idx, sym in enumerate(tickers_lista):
             if not sym:
                 continue
-            try:
-                q_res = requests.get(
-                    f"{api_tradier}markets/quotes",
-                    params={"symbols": sym},
-                    headers=headers_tradier,
-                    timeout=10,
-                ).json()
-            except Exception:
-                continue
-            quote_data = q_res.get("quotes", {}).get("quote")
+            q_res = _cached_tradier_quote(sym, api_tradier, token or "")
+            quote_data = (q_res or {}).get("quotes", {}).get("quote")
             if not quote_data:
                 continue
             price = float(quote_data.get("last", 0) or 0)
             sma200, sma40, stoch_v, atr_v, hv_v = _get_market_techs(sym)
 
             e_date = earnings_db.get(sym)
-            try:
-                exps = requests.get(
-                    f"{api_tradier}markets/options/expirations",
-                    params={"symbol": sym},
-                    headers=headers_tradier,
-                    timeout=10,
-                ).json()
-            except Exception:
-                continue
+            exps = _cached_tradier_expirations(sym, api_tradier, token or "")
             if not exps or "expirations" not in exps:
                 continue
             exp_data = exps.get("expirations")
@@ -862,15 +894,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                     continue
                 if not (dte_r[0] <= dte <= dte_r[1]):
                     continue
-                try:
-                    chain = requests.get(
-                        f"{api_tradier}markets/options/chains",
-                        params={"symbol": sym, "expiration": d_str, "greeks": "true"},
-                        headers=headers_tradier,
-                        timeout=10,
-                    ).json()
-                except Exception:
-                    continue
+                chain = _cached_tradier_chain(sym, d_str, api_tradier, token or "")
                 if not chain or "options" not in chain or not chain["options"]:
                     continue
                 opts = chain["options"]["option"]
@@ -2182,8 +2206,11 @@ def run():
             date_to_s = date_to.isoformat()
             account_name = acc_data.get("name", "")
 
-            # Filtros: consulta ligera (solo tickers/estrategias) para no cargar todos los trades
-            filter_options = get_trade_filter_options(account_id)
+            # Filtros y datos de reporte: todo en try/except para que la pestaña siempre se muestre (p. ej. en web/PostgreSQL)
+            try:
+                filter_options = get_trade_filter_options(account_id)
+            except Exception:
+                filter_options = {"tickers": [], "strategies": []}
             tickers_for_filter = filter_options.get("tickers") or []
             strategies_for_filter = filter_options.get("strategies") or []
             c_f1, c_f2, c_f3 = st.columns([1, 1, 1])
@@ -2209,14 +2236,20 @@ def run():
                     key="report_status_filter",
                 )
 
-            report_trades = get_trades_for_report(
-                account_id,
-                date_from_s,
-                date_to_s,
-                ticker=ticker_filter or None,
-                strategy=strategy_filter or None,
-                status=status_filter or None,
-            )
+            try:
+                report_trades = get_trades_for_report(
+                    account_id,
+                    date_from_s,
+                    date_to_s,
+                    ticker=ticker_filter or None,
+                    strategy=strategy_filter or None,
+                    status=status_filter or None,
+                )
+            except Exception as e:
+                report_trades = []
+                st.warning("No se pudieron cargar los trades del reporte. Revisa la conexión a la base de datos.")
+                if getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
+                    st.caption("En la versión web los datos vienen de la base en la nube. Si el error persiste, revisa los logs en Manage app.")
             if report_trades:
                 # Expandir "apertura cerrada por recompra" (formato antiguo) en 2 filas: apertura + recompra
                 def _is_opening_with_buyback(t):
@@ -2224,21 +2257,22 @@ def run():
                     a = (t.get("asset_type") or "").strip().upper()
                     ct = (t.get("close_type") or "").strip().lower()
                     return a == "OPTION" and e != "CLOSING" and ct in ("buyback", "recompra")
-                display_trades = []
-                for t in report_trades:
-                    if _is_opening_with_buyback(t):
-                        r_open = dict(t)
-                        r_open["close_type"] = None
-                        r_open["buyback_debit"] = None
-                        display_trades.append(r_open)
-                        r_close = dict(t)
-                        r_close["total_usd"] = -round2(float(t.get("buyback_debit") or 0))
-                        r_close["close_type"] = "buyback"
-                        display_trades.append(r_close)
-                    else:
-                        display_trades.append(dict(t))
-                prev_df = pd.DataFrame(display_trades)
-                prev_df = prev_df.rename(
+                try:
+                    display_trades = []
+                    for t in report_trades:
+                        if _is_opening_with_buyback(t):
+                            r_open = dict(t)
+                            r_open["close_type"] = None
+                            r_open["buyback_debit"] = None
+                            display_trades.append(r_open)
+                            r_close = dict(t)
+                            r_close["total_usd"] = -round2(float(t.get("buyback_debit") or 0))
+                            r_close["close_type"] = "buyback"
+                            display_trades.append(r_close)
+                        else:
+                            display_trades.append(dict(t))
+                    prev_df = pd.DataFrame(display_trades)
+                    prev_df = prev_df.rename(
                     columns={
                         "trade_date": "Fecha",
                         "ticker": "Ticker",
@@ -2328,6 +2362,8 @@ def run():
                                     db.set_trade_buyback(trade_id_sel, account_id, total_save)
                                     st.success("Débito guardado. El reporte se actualizará.")
                                     st.rerun()
+                except Exception:
+                    st.warning("No se pudo construir la tabla del reporte. Los datos pueden tener un formato distinto.")
             else:
                 st.info("No hay trades en este rango.")
                 if getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):

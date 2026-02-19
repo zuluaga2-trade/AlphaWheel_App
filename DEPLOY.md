@@ -190,3 +190,21 @@ ALPHAWHEEL_DATABASE_URL = "postgresql://usuario:contraseña@host:5432/nombre_bd"
 
 Sustituye `ALPHAWHEEL_DATABASE_URL` por la URL real que te dio Neon o Supabase (con usuario, contraseña, host y nombre de BD).  
 La app crea las tablas al arrancar; no hace falta configurar nada más. Tras eso, usuarios y posiciones **persisten** entre redeploys y actualizaciones de código.
+
+### 5.3 Misma base de datos en local y en la nube
+
+Para que **local (tu PC) y la versión web** usen los **mismos datos** (mismos usuarios, cuentas, trades, reportes):
+
+1. **En la nube**: ya tienes `ALPHAWHEEL_DATABASE_URL` en **Secrets** de Streamlit Cloud con la URL de Neon (o Supabase).
+2. **En local**: usa la **misma URL** de una de estas formas:
+   - **Opción A** — Crea o edita `.streamlit/secrets.toml` (no se sube a GitHub) y añade:
+     ```toml
+     ALPHAWHEEL_DATABASE_URL = "postgresql://usuario:contraseña@host/neondb?sslmode=require"
+     ```
+   - **Opción B** — Antes de ejecutar la app, define la variable de entorno en PowerShell:
+     ```powershell
+     $env:ALPHAWHEEL_DATABASE_URL="postgresql://usuario:contraseña@host/neondb?sslmode=require"
+     py -m streamlit run app/Home.py
+     ```
+
+Con la misma URL en ambos sitios, la app usa siempre la base PostgreSQL en la nube: los datos son **idénticos** en local y en el navegador.
