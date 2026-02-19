@@ -3,6 +3,7 @@
 import html as html_module
 import io
 from datetime import datetime, date, timedelta
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -139,7 +140,7 @@ def fmt2(val):
     return f"{v:,.2f}" if isinstance(v, (int, float)) else str(val)
 
 
-def _parse_thinkorswim_symbol(s: str) -> dict | None:
+def _parse_thinkorswim_symbol(s: str) -> Optional[dict]:
     """
     Parsea símbolo tipo Thinkorswim: .NOW260227P105 (CSP) o .NOW260227C108 (CC).
     Formato: [.]ROOT + YYMMDD + P/C + STRIKE → ticker, exp (YYYY-MM-DD), option_type, strike.
@@ -568,7 +569,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                 st.error(f"Error al obtener cotizaciones: {e}")
             else:
                 # Tradier puede devolver quote como objeto o como lista de uno
-                def _normalize_quote(resp: dict, key: str = "quote") -> dict | None:
+                def _normalize_quote(resp: dict, key: str = "quote") -> Optional[dict]:
                     q = (resp.get("quotes") or {}).get(key) or resp.get(key)
                     if q is None:
                         return None
@@ -2273,95 +2274,95 @@ def run():
                             display_trades.append(dict(t))
                     prev_df = pd.DataFrame(display_trades)
                     prev_df = prev_df.rename(
-                    columns={
-                        "trade_date": "Fecha",
-                        "ticker": "Ticker",
-                        "strategy_type": "Estrategia",
-                        "quantity": "Cant.",
-                        "strike": "Strike",
-                        "expiration_date": "Expiración",
-                        "status": "Estado",
-                        "closed_date": "Cierre",
-                        "close_type": "Tipo_cierre",
-                        "buyback_debit": "Débito_recompra",
-                        "campaign_root_id": "Campaña_id",
-                        "campaign_start_date": "Inicio_campaña",
-                    }
-                )
-                if "Tipo_cierre" in prev_df.columns:
-                    prev_df["Tipo_cierre"] = prev_df["Tipo_cierre"].fillna("").replace("buyback", "Recompra")
-                if "total_usd" in prev_df.columns:
-                    is_recompra = prev_df["Tipo_cierre"].fillna("").isin(("Recompra", "buyback"))
-                    is_option = prev_df.get("asset_type", pd.Series(dtype=str)).fillna("").str.strip().str.upper() == "OPTION"
-                    prev_df["Prima"] = prev_df["total_usd"].where(~is_recompra & is_option)
-                    prev_df["Prima"] = prev_df["Prima"].apply(lambda x: "—" if x is None or (isinstance(x, float) and pd.isna(x)) else (round2(x) if isinstance(x, (int, float)) else x))
-                else:
-                    prev_df["Prima"] = prev_df.get("price", pd.Series(dtype=float))
-                if "Débito_recompra" in prev_df.columns:
-                    def _fmt_debito(x):
-                        if x is None or (isinstance(x, float) and pd.isna(x)):
-                            return ""
-                        if isinstance(x, (int, float)):
-                            return round2(x)
-                        return x
-                    prev_df["Débito_recompra"] = prev_df["Débito_recompra"].apply(_fmt_debito)
-                cols_show = [c for c in ["Fecha", "Ticker", "Estrategia", "Cant.", "Prima", "Strike", "Expiración", "Estado", "Cierre", "Tipo_cierre", "Débito_recompra"] if c in prev_df.columns]
-                st.dataframe(prev_df[cols_show] if cols_show else prev_df, use_container_width=True, height=220)
-                # Neto: solo opciones; apertura cerrada por recompra → prima − débito
-                def _contrib_neto(t):
-                    if (t.get("asset_type") or "").strip().upper() != "OPTION":
-                        return 0
-                    total = t.get("total_usd") or 0
-                    if _is_opening_with_buyback(t):
-                        return total - float(t.get("buyback_debit") or 0)
-                    return total
-                neto_periodo = sum(_contrib_neto(t) for t in report_trades)
-                st.metric("Neto del periodo (primas − débitos)", f"${fmt2(neto_periodo)}", help="Solo opciones: primas menos débitos de recompra. No incluye valor de acciones/assignment.")
-                # Corregir débito de recompra: fila CLOSING (nueva) o fila de apertura con close_type=buyback (formato antiguo)
-                def _is_recompra_report(t):
-                    e = (t.get("entry_type") or "").strip().upper()
-                    a = (t.get("asset_type") or "").strip().upper()
-                    ct = (t.get("close_type") or "").strip().lower()
-                    return (
-                        a == "OPTION"
-                        and (
-                            e == "CLOSING"
-                            or (t.get("parent_trade_id") and (float(t.get("price") or 0) <= 0))
-                            or ct in ("buyback", "recompra")
-                        )
+                        columns={
+                            "trade_date": "Fecha",
+                            "ticker": "Ticker",
+                            "strategy_type": "Estrategia",
+                            "quantity": "Cant.",
+                            "strike": "Strike",
+                            "expiration_date": "Expiración",
+                            "status": "Estado",
+                            "closed_date": "Cierre",
+                            "close_type": "Tipo_cierre",
+                            "buyback_debit": "Débito_recompra",
+                            "campaign_root_id": "Campaña_id",
+                            "campaign_start_date": "Inicio_campaña",
+                        }
                     )
-                recompras_en_reporte = [(i, t) for i, t in enumerate(report_trades) if _is_recompra_report(t)]
-                if recompras_en_reporte:
-                    with st.expander("✏️ Corregir débito de recompra (precio por acción)", expanded=any((float(t.get("buyback_debit") or 0) == 0) for _, t in recompras_en_reporte)):
-                        st.caption("Si una recompra muestra débito 0 o incorrecto, indica el **precio por acción** pagado; la app calcula el total (precio × 100 × contratos).")
-                        opts = []
-                        for i, t in recompras_en_reporte:
-                            fd = str(t.get("trade_date") or "")[:10]
-                            tk = t.get("ticker") or ""
-                            q = int(t.get("quantity") or 0)
-                            actual = t.get("buyback_debit")
-                            actual_s = f"${fmt2(actual)}" if actual is not None else "$0"
-                            opts.append((t["trade_id"], f"{tk} | {fd} | {q} contr. | débito actual: {actual_s}"))
-                        if opts:
-                            sel_idx = st.selectbox("Recompra a corregir", range(len(opts)), format_func=lambda i: opts[i][1], key="report_fix_recompra_cockpit")
-                            trade_id_sel = opts[sel_idx][0]
-                            tr_sel = next(t for t in report_trades if t["trade_id"] == trade_id_sel)
-                            qty_sel = int(tr_sel.get("quantity") or 0)
-                            total_actual = tr_sel.get("buyback_debit")
-                            if total_actual is not None:
-                                total_actual = float(total_actual)
-                            elif ((tr_sel.get("entry_type") or "").upper() == "CLOSING" and (float(tr_sel.get("price") or 0) < 0)):
-                                total_actual = abs(float(tr_sel.get("price") or 0) * qty_sel * 100)
-                            else:
-                                total_actual = 0.0
-                            precio_actual = (total_actual / (qty_sel * 100)) if qty_sel else 0.0
-                            with st.form(key="report_fix_debit_form_cockpit"):
-                                precio_edit = st.number_input("Precio por acción ($)", value=round2(precio_actual), min_value=0.0, step=0.01, format="%.2f", key="report_precio_recompra_cockpit", help="Ej: 0.02 y 2 contratos → total $4.")
-                                if st.form_submit_button("Guardar y actualizar reporte"):
-                                    total_save = round2(precio_edit * 100 * qty_sel)
-                                    db.set_trade_buyback(trade_id_sel, account_id, total_save)
-                                    st.success("Débito guardado. El reporte se actualizará.")
-                                    st.rerun()
+                    if "Tipo_cierre" in prev_df.columns:
+                        prev_df["Tipo_cierre"] = prev_df["Tipo_cierre"].fillna("").replace("buyback", "Recompra")
+                    if "total_usd" in prev_df.columns:
+                        is_recompra = prev_df["Tipo_cierre"].fillna("").isin(("Recompra", "buyback"))
+                        is_option = prev_df.get("asset_type", pd.Series(dtype=str)).fillna("").str.strip().str.upper() == "OPTION"
+                        prev_df["Prima"] = prev_df["total_usd"].where(~is_recompra & is_option)
+                        prev_df["Prima"] = prev_df["Prima"].apply(lambda x: "—" if x is None or (isinstance(x, float) and pd.isna(x)) else (round2(x) if isinstance(x, (int, float)) else x))
+                    else:
+                        prev_df["Prima"] = prev_df.get("price", pd.Series(dtype=float))
+                    if "Débito_recompra" in prev_df.columns:
+                        def _fmt_debito(x):
+                            if x is None or (isinstance(x, float) and pd.isna(x)):
+                                return ""
+                            if isinstance(x, (int, float)):
+                                return round2(x)
+                            return x
+                        prev_df["Débito_recompra"] = prev_df["Débito_recompra"].apply(_fmt_debito)
+                    cols_show = [c for c in ["Fecha", "Ticker", "Estrategia", "Cant.", "Prima", "Strike", "Expiración", "Estado", "Cierre", "Tipo_cierre", "Débito_recompra"] if c in prev_df.columns]
+                    st.dataframe(prev_df[cols_show] if cols_show else prev_df, use_container_width=True, height=220)
+                    # Neto: solo opciones; apertura cerrada por recompra → prima − débito
+                    def _contrib_neto(t):
+                        if (t.get("asset_type") or "").strip().upper() != "OPTION":
+                            return 0
+                        total = t.get("total_usd") or 0
+                        if _is_opening_with_buyback(t):
+                            return total - float(t.get("buyback_debit") or 0)
+                        return total
+                    neto_periodo = sum(_contrib_neto(t) for t in report_trades)
+                    st.metric("Neto del periodo (primas − débitos)", f"${fmt2(neto_periodo)}", help="Solo opciones: primas menos débitos de recompra. No incluye valor de acciones/assignment.")
+                    # Corregir débito de recompra: fila CLOSING (nueva) o fila de apertura con close_type=buyback (formato antiguo)
+                    def _is_recompra_report(t):
+                        e = (t.get("entry_type") or "").strip().upper()
+                        a = (t.get("asset_type") or "").strip().upper()
+                        ct = (t.get("close_type") or "").strip().lower()
+                        return (
+                            a == "OPTION"
+                            and (
+                                e == "CLOSING"
+                                or (t.get("parent_trade_id") and (float(t.get("price") or 0) <= 0))
+                                or ct in ("buyback", "recompra")
+                            )
+                        )
+                    recompras_en_reporte = [(i, t) for i, t in enumerate(report_trades) if _is_recompra_report(t)]
+                    if recompras_en_reporte:
+                        with st.expander("✏️ Corregir débito de recompra (precio por acción)", expanded=any((float(t.get("buyback_debit") or 0) == 0) for _, t in recompras_en_reporte)):
+                            st.caption("Si una recompra muestra débito 0 o incorrecto, indica el **precio por acción** pagado; la app calcula el total (precio × 100 × contratos).")
+                            opts = []
+                            for i, t in recompras_en_reporte:
+                                fd = str(t.get("trade_date") or "")[:10]
+                                tk = t.get("ticker") or ""
+                                q = int(t.get("quantity") or 0)
+                                actual = t.get("buyback_debit")
+                                actual_s = f"${fmt2(actual)}" if actual is not None else "$0"
+                                opts.append((t["trade_id"], f"{tk} | {fd} | {q} contr. | débito actual: {actual_s}"))
+                            if opts:
+                                sel_idx = st.selectbox("Recompra a corregir", range(len(opts)), format_func=lambda i: opts[i][1], key="report_fix_recompra_cockpit")
+                                trade_id_sel = opts[sel_idx][0]
+                                tr_sel = next(t for t in report_trades if t["trade_id"] == trade_id_sel)
+                                qty_sel = int(tr_sel.get("quantity") or 0)
+                                total_actual = tr_sel.get("buyback_debit")
+                                if total_actual is not None:
+                                    total_actual = float(total_actual)
+                                elif ((tr_sel.get("entry_type") or "").upper() == "CLOSING" and (float(tr_sel.get("price") or 0) < 0)):
+                                    total_actual = abs(float(tr_sel.get("price") or 0) * qty_sel * 100)
+                                else:
+                                    total_actual = 0.0
+                                precio_actual = (total_actual / (qty_sel * 100)) if qty_sel else 0.0
+                                with st.form(key="report_fix_debit_form_cockpit"):
+                                    precio_edit = st.number_input("Precio por acción ($)", value=round2(precio_actual), min_value=0.0, step=0.01, format="%.2f", key="report_precio_recompra_cockpit", help="Ej: 0.02 y 2 contratos → total $4.")
+                                    if st.form_submit_button("Guardar y actualizar reporte"):
+                                        total_save = round2(precio_edit * 100 * qty_sel)
+                                        db.set_trade_buyback(trade_id_sel, account_id, total_save)
+                                        st.success("Débito guardado. El reporte se actualizará.")
+                                        st.rerun()
                 except Exception:
                     st.warning("No se pudo construir la tabla del reporte. Los datos pueden tener un formato distinto.")
             else:

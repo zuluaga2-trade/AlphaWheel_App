@@ -5,6 +5,7 @@
 import sqlite3
 import os
 from pathlib import Path
+from typing import Optional
 
 import config
 
@@ -453,7 +454,7 @@ def get_user_bunkers(user_id: int) -> list:
         conn.close()
 
 
-def get_bunker_by_id(bunker_id: int, user_id: int) -> dict | None:
+def get_bunker_by_id(bunker_id: int, user_id: int) -> Optional[dict]:
     """Un búnker por ID (solo si pertenece al usuario)."""
     if not bunker_id or not user_id:
         return None
@@ -482,7 +483,7 @@ def get_bunker_by_id(bunker_id: int, user_id: int) -> dict | None:
         conn.close()
 
 
-def create_bunker(user_id: int, name: str, tickers_text: str = "") -> int | None:
+def create_bunker(user_id: int, name: str, tickers_text: str = "") -> Optional[int]:
     """Crea un búnker. Devuelve bunker_id o None si falla (ej. nombre duplicado)."""
     if not user_id or not (name or "").strip():
         return None
@@ -522,7 +523,7 @@ def create_bunker(user_id: int, name: str, tickers_text: str = "") -> int | None
         conn.close()
 
 
-def update_bunker(bunker_id: int, user_id: int, name: str | None = None, tickers_text: str | None = None) -> bool:
+def update_bunker(bunker_id: int, user_id: int, name: Optional[str] = None, tickers_text: Optional[str] = None) -> bool:
     """Actualiza nombre y/o tickers de un búnker. Solo si pertenece al user_id."""
     if not bunker_id or not user_id:
         return False
