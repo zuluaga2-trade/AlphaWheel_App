@@ -36,100 +36,89 @@ def _get_trades_for_report(
     - Apertura en rango: trade_date >= date_from AND trade_date <= date_to
     - Cierre en rango: closed_date >= date_from AND closed_date <= date_to
     Así si cierras por recompra en febrero, el trade sale en el reporte de febrero.
-    Intenta primero con close_type y buyback_debit (para ver todas las recompras); si la BD no tiene esas columnas, usa consulta reducida.
+
+    Para que el comportamiento sea idéntico en SQLite y PostgreSQL y evitar problemas
+    con diferencias en SQL, obtenemos todos los trades de la cuenta y filtramos en Python.
     """
-    conn = db.get_conn()
+    # Obtener todos los trades de la cuenta
     try:
-        params = [account_id, date_from, date_to, date_from, date_to]
-        if ticker:
-            params.append(ticker.strip().upper())
-        if strategy:
-            params.append(strategy)
-        if status:
-            params.append(status)
+        all_trades = db.get_trades_by_account(account_id)
+    except Exception:
+        all_trades = []
 
-        # Consulta completa: incluye close_type y buyback_debit (recompras visibles en reporte y expander).
-        base_sql_full = """
-            SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
-                   quantity, price, strike, expiration_date, status,
-                   entry_type, closed_date, close_type, buyback_debit, parent_trade_id, comment
-            FROM Trade
-            WHERE account_id = ?
-              AND (
-                (trade_date >= ? AND trade_date <= ?)
-                OR (closed_date IS NOT NULL AND closed_date >= ? AND closed_date <= ?)
-              )
-        """
-        base_sql_reduced = """
-            SELECT trade_id, trade_date, ticker, asset_type, strategy_type,
-                   quantity, price, strike, expiration_date, status,
-                   entry_type, closed_date, parent_trade_id, comment
-            FROM Trade
-            WHERE account_id = ?
-              AND (
-                (trade_date >= ? AND trade_date <= ?)
-                OR (closed_date IS NOT NULL AND closed_date >= ? AND closed_date <= ?)
-              )
-        """
-        filters = ""
-        if ticker:
-            filters += " AND ticker = ?"
-        if strategy:
-            filters += " AND strategy_type = ?"
-        if status:
-            filters += " AND status = ?"
-        order_sql = " ORDER BY trade_date, trade_id"
+    rows: List[Dict] = []
+    try:
+        d_from = datetime.fromisoformat(date_from).date()
+        d_to = datetime.fromisoformat(date_to).date()
+    except Exception:
+        d_from = None
+        d_to = None
 
-        # Intentar consulta completa; si falla (p. ej. BD sin close_type/buyback_debit), usar reducida.
+    for t in all_trades:
+        # Filtros opcionales por ticker / estrategia / estado
+        if ticker and (t.get("ticker") or "").strip().upper() != (ticker or "").strip().upper():
+            continue
+        if strategy and (t.get("strategy_type") or "").strip().upper() != (strategy or "").strip().upper():
+            continue
+        if status and (t.get("status") or "").strip().upper() != (status or "").strip().upper():
+            continue
+
+        td_str = (t.get("trade_date") or "")[:10]
+        cd_str = (t.get("closed_date") or "")[:10]
         try:
-            cur = conn.execute(base_sql_full + filters + order_sql, params)
-            rows = [dict(r) for r in cur.fetchall()]
+            td = datetime.fromisoformat(td_str).date() if td_str else None
         except Exception:
-            try:
-                cur = conn.execute(base_sql_reduced + filters + order_sql, params)
-                rows = [dict(r) for r in cur.fetchall()]
-            except Exception:
-                raise
+            td = None
+        try:
+            cd = datetime.fromisoformat(cd_str).date() if cd_str else None
+        except Exception:
+            cd = None
 
-        # Enriquecer: campaña + total USD (convención opciones: 1 contrato = 100, total = precio × 100 × contratos)
-        for r in rows:
-            root_id = get_campaign_root_id(account_id, r["trade_id"])
-            r["campaign_root_id"] = root_id
-            r["campaign_start_date"] = (
-                get_campaign_start_date(account_id, r["trade_id"]) if root_id else None
-            )
-            atype = (r.get("asset_type") or "").strip().upper()
-            qty = int(r.get("quantity") or 0)
-            # No usar safe_float(price): redondea a 2 decimales y anula débitos pequeños (ej. 0.02 → price -0.0001 → 0)
-            try:
-                p_raw = float(r.get("price")) if r.get("price") is not None else 0.0
-            except (TypeError, ValueError):
-                p_raw = 0.0
-            # Total en USD: opciones = precio × 100 × contratos (prima positiva, débito negativo); acciones = precio × cantidad
-            mult = 100 if atype == "OPTION" else 1
-            r["total_usd"] = round2(p_raw * qty * mult)
+        # Condiciones de rango
+        cond_open = (d_from is None or d_to is None) or (td is not None and d_from <= td <= d_to)
+        cond_close = (d_from is None or d_to is None) or (cd is not None and d_from <= cd <= d_to)
+        if not (cond_open or cond_close):
+            continue
 
-            # Recompra: trade de cierre. Débito = precio por acción × 100 × contratos (como la prima). Preferir BD; si no, derivar.
-            entry = (r.get("entry_type") or "").strip().upper()
-            is_closing = (
-                entry == "CLOSING"
-                or (r.get("parent_trade_id") and atype == "OPTION" and p_raw <= 0)
-                or (atype == "OPTION" and p_raw < 0)
-            )
-            if is_closing and atype == "OPTION":
-                r["close_type"] = r.get("close_type") or "buyback"
-                if r.get("buyback_debit") is not None:
-                    try:
-                        r["buyback_debit"] = round2(float(r["buyback_debit"]))
-                    except (TypeError, ValueError):
-                        r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else 0.0
-                else:
-                    r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else round2(abs(r["total_usd"]))
-                # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
-                r["total_usd"] = -round2(float(r["buyback_debit"]))
-        return rows
-    finally:
-        conn.close()
+        rows.append(dict(t))
+
+    # Enriquecer: campaña + total USD (convención opciones: 1 contrato = 100, total = precio × 100 × contratos)
+    for r in rows:
+        root_id = get_campaign_root_id(account_id, r["trade_id"])
+        r["campaign_root_id"] = root_id
+        r["campaign_start_date"] = (
+            get_campaign_start_date(account_id, r["trade_id"]) if root_id else None
+        )
+        atype = (r.get("asset_type") or "").strip().upper()
+        qty = int(r.get("quantity") or 0)
+        # No usar safe_float(price): redondea a 2 decimales y anula débitos pequeños (ej. 0.02 → price -0.0001 → 0)
+        try:
+            p_raw = float(r.get("price")) if r.get("price") is not None else 0.0
+        except (TypeError, ValueError):
+            p_raw = 0.0
+        # Total en USD: opciones = precio × 100 × contratos (prima positiva, débito negativo); acciones = precio × cantidad
+        mult = 100 if atype == "OPTION" else 1
+        r["total_usd"] = round2(p_raw * qty * mult)
+
+        # Recompra: trade de cierre. Débito = precio por acción × 100 × contratos (como la prima). Preferir BD; si no, derivar.
+        entry = (r.get("entry_type") or "").strip().upper()
+        is_closing = (
+            entry == "CLOSING"
+            or (r.get("parent_trade_id") and atype == "OPTION" and p_raw <= 0)
+            or (atype == "OPTION" and p_raw < 0)
+        )
+        if is_closing and atype == "OPTION":
+            r["close_type"] = r.get("close_type") or "buyback"
+            if r.get("buyback_debit") is not None:
+                try:
+                    r["buyback_debit"] = round2(float(r["buyback_debit"]))
+                except (TypeError, ValueError):
+                    r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else 0.0
+            else:
+                r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else round2(abs(r["total_usd"]))
+            # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
+            r["total_usd"] = -round2(float(r["buyback_debit"]))
+    return rows
 
 
 @st.cache_data(ttl=120, show_spinner=False)
