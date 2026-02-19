@@ -133,6 +133,18 @@ def _get_trades_for_report(
 
 
 @st.cache_data(ttl=120, show_spinner=False)
+def count_trades_for_account(account_id: int) -> int:
+    """Número total de trades de la cuenta (cualquier fecha). Para mensajes cuando el rango devuelve vacío."""
+    conn = db.get_conn()
+    try:
+        cur = conn.execute("SELECT COUNT(*) AS n FROM Trade WHERE account_id = ?", (account_id,))
+        row = cur.fetchone()
+        return int(row.get("n", 0) or 0) if row else 0
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=120, show_spinner=False)
 def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
     """
     Opciones ligeras para los filtros de reporte (tickers y estrategias).
@@ -152,7 +164,6 @@ def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
         conn.close()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
 def get_trades_for_report(
     account_id: int,
     date_from: str,
@@ -163,7 +174,7 @@ def get_trades_for_report(
 ) -> List[Dict]:
     """
     API pública: lista de trades en el rango para preview y reportes.
-    Cache 2 min para no repetir la misma consulta al cambiar solo la vista.
+    Sin caché para que la web siempre muestre datos actuales (evitar resultado vacío cacheado).
     """
     return _get_trades_for_report(account_id, date_from, date_to, ticker, strategy, status)
 
@@ -376,7 +387,6 @@ def _pdf_fpdf(account_id: int, date_from: str, date_to: str, account_name: str) 
     return buf.getvalue()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
 def tax_efficiency_summary(
     account_id: int,
     date_from: str,
@@ -384,7 +394,7 @@ def tax_efficiency_summary(
 ) -> Dict[str, Any]:
     """
     Resumen Tax Efficiency: ganancias/pérdidas cerradas en el rango.
-    Cache 2 min para no repetir la misma consulta.
+    Sin caché para que la web muestre datos actuales.
     """
     conn = db.get_conn()
     try:

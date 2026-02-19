@@ -58,6 +58,7 @@ from reports.bitacora import (
     tax_efficiency_summary,
     get_trades_for_report,
     get_trade_filter_options,
+    count_trades_for_account,
 )
 from app.styles import PROFESSIONAL_CSS
 from app.session_helpers import (
@@ -2367,7 +2368,10 @@ def run():
                     st.warning("No se pudo construir la tabla del reporte. Los datos pueden tener un formato distinto.")
             else:
                 st.info("No hay trades en este rango.")
-                if getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
+                total_in_account = count_trades_for_account(account_id)
+                if total_in_account > 0:
+                    st.caption("Hay trades en esta cuenta pero ninguno entra en el rango de fechas. Prueba ampliar **Desde** (ej. 2025-01-01) o **Hasta**.")
+                elif getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
                     st.caption("En la versión web los reportes usan la base de datos de la nube; no se sincroniza con tu PC. Los trades que ves en local solo aparecen aquí si usas la misma cuenta en la nube o importas datos.")
             try:
                 tax = tax_efficiency_summary(account_id, date_from_s, date_to_s)
