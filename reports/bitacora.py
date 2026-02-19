@@ -79,17 +79,15 @@ def _get_trades_for_report(
             filters += " AND status = ?"
         order_sql = " ORDER BY trade_date, trade_id"
 
-        base_sql = base_sql_full
+        # Intentar consulta completa; si falla (p. ej. BD sin close_type/buyback_debit), usar reducida.
         try:
-            cur = conn.execute(base_sql + filters + order_sql, params)
+            cur = conn.execute(base_sql_full + filters + order_sql, params)
             rows = [dict(r) for r in cur.fetchall()]
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "close_type" in err_msg or "buyback_debit" in err_msg or "undefinedcolumn" in err_msg or "no such column" in err_msg:
-                base_sql = base_sql_reduced
-                cur = conn.execute(base_sql + filters + order_sql, params)
+        except Exception:
+            try:
+                cur = conn.execute(base_sql_reduced + filters + order_sql, params)
                 rows = [dict(r) for r in cur.fetchall()]
-            else:
+            except Exception:
                 raise
 
         # Enriquecer: campaña + total USD (convención opciones: 1 contrato = 100, total = precio × 100 × contratos)

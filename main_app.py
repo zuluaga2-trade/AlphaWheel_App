@@ -1430,6 +1430,8 @@ with tab_report:
                                 st.rerun()
         else:
             st.info("No hay trades en este rango. Ajusta las fechas o añade posiciones.")
+            if getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
+                st.caption("En la versión web los reportes usan la base de datos de la nube; no se sincroniza con tu PC.")
             st.caption("0 trades")
 
         st.markdown("---")

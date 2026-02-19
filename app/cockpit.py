@@ -842,9 +842,24 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                 continue
             if not exps or "expirations" not in exps:
                 continue
-
-            for d_str in exps["expirations"]["date"]:
-                dte = (datetime.strptime(d_str, "%Y-%m-%d") - today).days
+            exp_data = exps.get("expirations")
+            if exp_data is None:
+                continue
+            # Tradier puede devolver {"date": ["...", ...]} o a veces otra estructura
+            if isinstance(exp_data, dict) and exp_data.get("date") is not None:
+                date_list = exp_data["date"] if isinstance(exp_data["date"], list) else [exp_data["date"]]
+            elif isinstance(exp_data, list):
+                date_list = exp_data
+            else:
+                continue
+            for d_str in date_list:
+                try:
+                    d_str = str(d_str).strip() if d_str is not None else ""
+                    if not d_str:
+                        continue
+                    dte = (datetime.strptime(d_str[:10], "%Y-%m-%d") - today).days
+                except (ValueError, TypeError):
+                    continue
                 if not (dte_r[0] <= dte <= dte_r[1]):
                     continue
                 try:
@@ -2315,6 +2330,8 @@ def run():
                                     st.rerun()
             else:
                 st.info("No hay trades en este rango.")
+                if getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
+                    st.caption("En la versión web los reportes usan la base de datos de la nube; no se sincroniza con tu PC. Los trades que ves en local solo aparecen aquí si usas la misma cuenta en la nube o importas datos.")
             try:
                 tax = tax_efficiency_summary(account_id, date_from_s, date_to_s)
                 st.json({"Total realizado": tax["total_realized_gain_loss"], "Trades cerrados": tax["closed_trades_count"], "Por ticker": tax["by_ticker"]})

@@ -7,9 +7,21 @@ from typing import Optional, Tuple
 from database import db
 
 try:
-    from config import ALLOWED_EMAILS
+    from config import ALLOWED_EMAILS, DATABASE_URL
 except ImportError:
     ALLOWED_EMAILS = None
+    DATABASE_URL = ""
+
+
+def _is_shared_env() -> bool:
+    """True si la app es multi-usuario/nube: no recordar último email (evitar que un usuario vea el de otro)."""
+    if ALLOWED_EMAILS is not None:
+        return True
+    try:
+        url = (DATABASE_URL or "").strip()
+        return "postgresql" in url
+    except Exception:
+        return False
 
 
 def _is_email_allowed(email: str) -> bool:
@@ -99,7 +111,9 @@ def _last_login_file() -> Path:
 
 
 def get_last_login_email() -> str:
-    """Devuelve el último email con el que se inició sesión (para pre-rellenar)."""
+    """Devuelve el último email con el que se inició sesión (para pre-rellenar). En modo multi-usuario/nube no se usa para no mostrar el email de otro usuario."""
+    if _is_shared_env():
+        return ""
     try:
         p = _last_login_file()
         if p.exists():
@@ -110,7 +124,9 @@ def get_last_login_email() -> str:
 
 
 def set_last_login_email(email: str) -> None:
-    """Guarda el email tras un login exitoso (recordar dispositivo)."""
+    """Guarda el email tras un login exitoso. En modo multi-usuario/nube no se guarda (cada usuario es independiente)."""
+    if _is_shared_env():
+        return
     try:
         email = (email or "").strip().lower()
         if email:

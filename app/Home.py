@@ -38,6 +38,7 @@ def render_login_register():
     with col2:
         st.markdown("<p class='login-title'>🦅 AlphaWheel Pro</p>", unsafe_allow_html=True)
         st.markdown("<p class='login-subtitle'>Control de estrategias de opciones · Multi-usuario · Multi-cuenta</p>", unsafe_allow_html=True)
+        st.caption("Si el navegador pregunta si guardar contraseña o datos del formulario, puedes elegir **No guardar**; la app guarda tu sesión mientras no cierres el navegador.")
         st.markdown("<div class='login-card'>", unsafe_allow_html=True)
 
         tab_login, tab_register = st.tabs(["Iniciar sesión", "Registrarse"])
@@ -84,7 +85,10 @@ def render_login_register():
                             st.success("Cuenta creada. Bienvenido.")
                             st.rerun()
                         else:
-                            st.error(err or "Error al registrar.")
+                            if err and "ya existe" in err.lower():
+                                st.error("Ya existe un usuario con ese email. Usa la pestaña **Iniciar sesión** para entrar con esa cuenta.")
+                            else:
+                                st.error(err or "Error al registrar.")
                     else:
                         st.warning("Email y contraseña obligatorios.")
 
