@@ -1161,6 +1161,11 @@ with tab_dash:
                                         key=f"buyback_debit_{selected_trade_id}",
                                         help="Mismo criterio que la prima: precio por acción. Ej: 0.02 → $2/contrato; 2 contratos = $4 total débito. Total = precio × 100 × contratos.",
                                     )
+                                    buyback_date_val = st.date_input(
+                                        "Fecha de recompra",
+                                        value=date.today(),
+                                        key=f"buyback_date_{selected_trade_id}",
+                                    )
                         col_save, col_del, col_close, _ = st.columns([1, 1, 1, 2])
                         with col_save:
                             if not is_recompra_trade and st.form_submit_button("Guardar cambios"):
@@ -1213,7 +1218,7 @@ with tab_dash:
                                     # Total débito = precio por acción × 100 × contratos (mismo criterio que la prima)
                                     qty_opt = int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0)
                                     total_debit = round2(buyback_debit_val * 100 * qty_opt) if is_open_trade else 0.0
-                                    close_trade_by_buyback(account_id, selected_trade_id, date.today().isoformat(), total_debit)
+                                    close_trade_by_buyback(account_id, selected_trade_id, buyback_date_val.isoformat(), total_debit)
                                     st.success("Recompra registrada como movimiento; posición cerrada. El débito resta del total de la campaña.")
                                     st.rerun()
                             elif not is_open_trade:

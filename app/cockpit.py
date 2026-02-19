@@ -2135,17 +2135,22 @@ def run():
                                 with c2:
                                     edit_exp = st.date_input("Expiración", value=exp_date_val, key=f"exp_date_{selected_trade_id}")
                                     edit_comment = st.text_area("Comentario", value=str(tr.get("comment") or ""), height=80, key=f"edit_comment_opt_{selected_trade_id}")
-                                    if is_open:
-                                        st.caption("Cerrar por recompra (comprar la opción):")
-                                        buyback_debit_val = st.number_input(
-                                            "Precio por acción ($)",
-                                            min_value=0.0,
-                                            value=0.0,
-                                            step=0.01,
-                                            format="%.2f",
-                                            key=f"buyback_debit_{selected_trade_id}",
-                                            help="Mismo criterio que la prima: precio por acción. Ej: 0.02 → $2/contrato; 2 contratos = $4 total débito. Total = precio × 100 × contratos.",
-                                        )
+                                if is_open:
+                                    st.caption("Cerrar por recompra (comprar la opción):")
+                                    buyback_debit_val = st.number_input(
+                                        "Precio por acción ($)",
+                                        min_value=0.0,
+                                        value=0.0,
+                                        step=0.01,
+                                        format="%.2f",
+                                        key=f"buyback_debit_{selected_trade_id}",
+                                        help="Mismo criterio que la prima: precio por acción. Ej: 0.02 → $2/contrato; 2 contratos = $4 total débito. Total = precio × 100 × contratos.",
+                                    )
+                                    buyback_date_val = st.date_input(
+                                        "Fecha de recompra",
+                                        value=date.today(),
+                                        key=f"buyback_date_{selected_trade_id}",
+                                    )
                             col_save, col_del, col_close, _ = st.columns([1, 1, 1, 2])
                             with col_save:
                                 if not is_recompra_trade and st.form_submit_button("Guardar"):
@@ -2190,7 +2195,7 @@ def run():
                                     if not is_stock and st.form_submit_button("Cerrar por recompra"):
                                         qty_opt = int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0)
                                         total_debit = round2(buyback_debit_val * 100 * qty_opt) if is_open else 0.0
-                                        close_trade_by_buyback(account_id, selected_trade_id, date.today().isoformat(), total_debit)
+                                        close_trade_by_buyback(account_id, selected_trade_id, buyback_date_val.isoformat(), total_debit)
                                         st.success("Recompra registrada como movimiento; posición cerrada. El débito resta del total de la campaña.")
                                         st.rerun()
                                 elif not is_open:
@@ -2374,11 +2379,10 @@ def run():
                 elif getattr(config, "DATABASE_URL", "") and "postgresql" in str(config.DATABASE_URL):
                     st.caption("En la versión web los reportes usan la base de datos de la nube; no se sincroniza con tu PC. Los trades que ves en local solo aparecen aquí si usas la misma cuenta en la nube o importas datos.")
             try:
-                tax = tax_efficiency_summary(account_id, date_from_s, date_to_s)
-                st.json({"Total realizado": tax["total_realized_gain_loss"], "Trades cerrados": tax["closed_trades_count"], "Por ticker": tax["by_ticker"]})
+                # Calculamos Tax Efficiency pero no mostramos el bloque JSON en producción
+                _ = tax_efficiency_summary(account_id, date_from_s, date_to_s)
             except Exception as e:
                 st.warning("No se pudo cargar el resumen Tax Efficiency. Revisa los logs si persiste.")
-                st.json({"Total realizado": 0, "Trades cerrados": 0, "Por ticker": {}})
             col1, col2, col3 = st.columns(3)
             csv_data = export_trades_csv(account_id, date_from_s, date_to_s, account_name)
             if csv_data:

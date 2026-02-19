@@ -137,20 +137,15 @@ def count_trades_for_account(account_id: int) -> int:
 def get_trade_filter_options(account_id: int) -> Dict[str, List[str]]:
     """
     Opciones ligeras para los filtros de reporte (tickers y estrategias).
-    Cache 2 min para no repetir consulta al cambiar solo filtros.
+    Cache 2 min para no repetir cálculo al cambiar solo filtros.
     """
-    conn = db.get_conn()
     try:
-        cur = conn.execute(
-            "SELECT DISTINCT ticker, strategy_type FROM Trade WHERE account_id = ? ORDER BY ticker, strategy_type",
-            (account_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        tickers = sorted({(r.get("ticker") or "").strip() for r in rows if r.get("ticker")})
-        strategies = sorted({(r.get("strategy_type") or "").strip() for r in rows if r.get("strategy_type")})
-        return {"tickers": tickers, "strategies": strategies}
-    finally:
-        conn.close()
+        trades = db.get_trades_by_account(account_id) or []
+    except Exception:
+        trades = []
+    tickers = sorted({(t.get("ticker") or "").strip().upper() for t in trades if t.get("ticker")})
+    strategies = sorted({(t.get("strategy_type") or "").strip().upper() for t in trades if t.get("strategy_type")})
+    return {"tickers": tickers, "strategies": strategies}
 
 
 def get_trades_for_report(
