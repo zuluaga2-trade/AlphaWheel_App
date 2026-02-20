@@ -73,8 +73,67 @@ from app.session_helpers import (
 from auth.auth import logout_user
 import config
 
-# Cache compartido Tradier (5 min): mismo ticker no se vuelve a consultar en la misma sesión/día
-_TRADIER_CACHE_TTL = 300  # segundos
+# Cache Tradier: TTL largo (30 min) y opcionalmente compartido entre usuarios (mismo ticker = caché único)
+_TRADIER_CACHE_TTL = 1800  # 30 minutos
+_TRADIER_SHARED_TTL = 1800  # 30 min para caché compartido (keyed solo por symbol/api_base)
+
+def _get_shared_tradier_token():
+    return getattr(config, "get_shared_tradier_token", lambda: "")()
+
+
+@st.cache_data(ttl=_TRADIER_SHARED_TTL, show_spinner=False)
+def _shared_tradier_quote(symbol: str, api_base: str) -> dict:
+    """Caché compartida por ticker: cualquier usuario que consulte el mismo ticker reutiliza el resultado."""
+    token = _get_shared_tradier_token()
+    if not (symbol and token and api_base):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/quotes",
+            params={"symbols": symbol},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=_TRADIER_SHARED_TTL, show_spinner=False)
+def _shared_tradier_expirations(symbol: str, api_base: str) -> dict:
+    """Caché compartida por ticker para expiraciones."""
+    token = _get_shared_tradier_token()
+    if not (symbol and token and api_base):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/options/expirations",
+            params={"symbol": symbol},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=_TRADIER_SHARED_TTL, show_spinner=False)
+def _shared_tradier_chain(symbol: str, expiration: str, api_base: str) -> dict:
+    """Caché compartida por ticker + expiración para cadenas de opciones."""
+    token = _get_shared_tradier_token()
+    if not (symbol and expiration and token and api_base):
+        return {}
+    try:
+        r = requests.get(
+            f"{api_base}markets/options/chains",
+            params={"symbol": symbol, "expiration": expiration, "greeks": "true"},
+            headers={"Authorization": f"Bearer {token.strip()}", "Accept": "application/json"},
+            timeout=10,
+        )
+        return r.json() or {}
+    except Exception:
+        return {}
+
 
 @st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
 def _cached_tradier_quote(symbol: str, api_base: str, token: str) -> dict:
@@ -91,6 +150,7 @@ def _cached_tradier_quote(symbol: str, api_base: str, token: str) -> dict:
     except Exception:
         return {}
 
+
 @st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
 def _cached_tradier_expirations(symbol: str, api_base: str, token: str) -> dict:
     if not (symbol and token):
@@ -106,6 +166,7 @@ def _cached_tradier_expirations(symbol: str, api_base: str, token: str) -> dict:
     except Exception:
         return {}
 
+
 @st.cache_data(ttl=_TRADIER_CACHE_TTL, show_spinner=False)
 def _cached_tradier_chain(symbol: str, expiration: str, api_base: str, token: str) -> dict:
     if not (symbol and expiration and token):
@@ -120,6 +181,98 @@ def _cached_tradier_chain(symbol: str, expiration: str, api_base: str, token: st
         return r.json() or {}
     except Exception:
         return {}
+
+
+def get_tradier_quote_cached(symbol: str, api_base: str, token: str) -> dict:
+    """Devuelve cotización: primero caché compartida (si hay token compartido), sino caché por usuario."""
+    if _get_shared_tradier_token():
+        out = _shared_tradier_quote(symbol, api_base)
+        if out:
+            return out
+    return _cached_tradier_quote(symbol, api_base, token or "")
+
+
+def get_tradier_expirations_cached(symbol: str, api_base: str, token: str) -> dict:
+    """Devuelve expiraciones: primero caché compartida, sino por usuario."""
+    if _get_shared_tradier_token():
+        out = _shared_tradier_expirations(symbol, api_base)
+        if out:
+            return out
+    return _cached_tradier_expirations(symbol, api_base, token or "")
+
+
+def get_tradier_chain_cached(symbol: str, expiration: str, api_base: str, token: str) -> dict:
+    """Devuelve cadena de opciones: primero caché compartida, sino por usuario."""
+    if _get_shared_tradier_token():
+        out = _shared_tradier_chain(symbol, expiration, api_base)
+        if out:
+            return out
+    return _cached_tradier_chain(symbol, expiration, api_base, token or "")
+
+
+# --- Caché compartida Alpha Vantage (earnings + overview): TTL largos, compartida entre usuarios ---
+_AV_SHARED_EARNINGS_TTL = 172800   # 48 h
+_AV_SHARED_OVERVIEW_TTL = 86400    # 24 h
+
+
+def _get_shared_av_key():
+    return getattr(config, "get_shared_av_key", lambda: "")()
+
+
+@st.cache_data(ttl=_AV_SHARED_EARNINGS_TTL, show_spinner=False)
+def _shared_earnings_calendar() -> dict:
+    """Calendario de earnings compartido por ticker; cualquier usuario reutiliza el resultado."""
+    av_key = _get_shared_av_key()
+    if not av_key:
+        return {}
+    try:
+        r = requests.get(
+            "https://www.alphavantage.co/query",
+            params={
+                "function": "EARNINGS_CALENDAR",
+                "horizon": "3month",
+                "apikey": av_key,
+            },
+            timeout=15,
+        )
+        return pd.read_csv(io.StringIO(r.text)).set_index("symbol")["reportDate"].to_dict()
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=_AV_SHARED_OVERVIEW_TTL, show_spinner=False)
+def _shared_overview(sym: str) -> Optional[dict]:
+    """Overview por ticker compartido (Alpha Vantage + fallback Yahoo); cualquier usuario reutiliza."""
+    av_key = _get_shared_av_key()
+    if av_key:
+        try:
+            r = requests.get(
+                "https://www.alphavantage.co/query",
+                params={"function": "OVERVIEW", "symbol": sym, "apikey": av_key},
+                timeout=8,
+            ).json()
+            if "Symbol" in r and float(r.get("AnalystTargetPrice", 0)) > 0:
+                return {
+                    "target": round(float(r.get("AnalystTargetPrice", 0)), 2),
+                    "margin": round(float(r.get("OperatingMarginTTM", 0)) * 100, 2),
+                    "roe": round(float(r.get("ReturnOnEquityTTM", 0)) * 100, 2),
+                    "debt": round(float(r.get("DebtToEquityRatio", 0)), 2),
+                    "source": "Alpha Vantage",
+                }
+        except Exception:
+            pass
+    try:
+        t = yf.Ticker(sym)
+        info = t.info
+        return {
+            "target": round(info.get("targetMeanPrice", 0), 2),
+            "margin": round(info.get("operatingMargins", 0) * 100, 2),
+            "roe": round(info.get("returnOnEquity", 0) * 100, 2),
+            "debt": round((info.get("debtToEquity", 0) or 0) / 100, 2),
+            "source": "Yahoo Finance",
+        }
+    except Exception:
+        return None
 
 
 def _get_tradier_token_for_user(user_id: int) -> tuple:
@@ -448,7 +601,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
         st.info("En la **barra lateral**: elige **Búnker** y un búnker (o créalo en **Crear y editar búnkers**), o elige **Ticker individual** y escribe un símbolo. Luego pulsa **Iniciar barrido**. También puedes pegar un símbolo Thinkorswim abajo para analizar un contrato.")
         return
 
-    @st.cache_data(ttl=86400, show_spinner=False)
+    @st.cache_data(ttl=172800, show_spinner=False)  # 48 h: mismo ticker no se vuelve a consultar
     def _sync_global_earnings(av_key_local: str):
         if not av_key_local:
             return {}
@@ -466,7 +619,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
         except Exception:
             return {}
 
-    @st.cache_data(ttl=86400, show_spinner=False)
+    @st.cache_data(ttl=86400, show_spinner=False)  # 24 h por ticker
     def _get_hybrid_overview(sym: str, av_key_local: str):
         if av_key_local:
             try:
@@ -530,7 +683,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
         except Exception:
             return None, None, 50.0, 0.0, 0.0
 
-    earnings_db = _sync_global_earnings(av_key)
+    earnings_db = _shared_earnings_calendar() if _get_shared_av_key() else _sync_global_earnings(av_key)
 
     # Analizar contrato manual (formato Thinkorswim)
     manual_sym = st.session_state.get("screener_manual_symbol")
@@ -664,8 +817,8 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                                 stoch_ok_cf = float(stoch_cf) < 30 if stoch_cf is not None else False
                                 earn_ok_cf = row.get("Earnings") != "SÍ"
                                 st.markdown(f"""<div class='vola-master' style='margin-top:12px;'><h3 style='margin:0; color:#9b59b6;'>⚠️ Riesgos del contrato</h3><table style='width:100%; border-collapse: collapse; margin-top:10px;'><tr style='font-size:15px;'><td style='padding:8px;'><b>SMA 200:</b> {'✅ Strike bajo SMA 200' if strike_ok_cf else '⚠️ Strike sobre SMA 200'}</td><td style='padding:8px;'><b>Stochastic full &lt;30:</b> {'✅ Cumple' if stoch_ok_cf else '⚠️ No cumple'}</td><td style='padding:8px;'><b>Earnings:</b> {'✅ No hay' if earn_ok_cf else '⚠️ Hay earnings'}</td></tr></table></div>""", unsafe_allow_html=True)
-                                if av_key:
-                                    av = _get_hybrid_overview(row["Ticker"], av_key)
+                                if _get_shared_av_key() or av_key:
+                                    av = _shared_overview(row["Ticker"]) if _get_shared_av_key() else _get_hybrid_overview(row["Ticker"], av_key)
                                     if av:
                                         up = round(((av["target"] - row["Precio"]) / row["Precio"]) * 100, 2)
                                         st.markdown(f"""<div class='fundamental-box'><b>📊 Perfil financiero ({av['source']}):</b><br>Márgenes: <b class='status-ok'>{av['margin']:,.2f}%</b> · ROE: <b class='status-ok'>{av['roe']:,.2f}%</b> · Deuda/Eq: <b class='status-ok'>{av['debt']:,.2f}</b><br>Target analistas: <b class='status-ok'>${av['target']:,.2f}</b> · Potencial: <b class='status-ok'>{up:,.2f}%</b></div>""", unsafe_allow_html=True)
@@ -800,8 +953,8 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                         unsafe_allow_html=True,
                     )
 
-                    if av_key:
-                        av = _get_hybrid_overview(row["Ticker"], av_key)
+                    if _get_shared_av_key() or av_key:
+                        av = _shared_overview(row["Ticker"]) if _get_shared_av_key() else _get_hybrid_overview(row["Ticker"], av_key)
                         if av:
                             up = round(((av["target"] - row["Precio"]) / row["Precio"]) * 100, 2)
                             st.markdown(
@@ -866,7 +1019,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
         for idx, sym in enumerate(tickers_lista):
             if not sym:
                 continue
-            q_res = _cached_tradier_quote(sym, api_tradier, token or "")
+            q_res = get_tradier_quote_cached(sym, api_tradier, token or "")
             quote_data = (q_res or {}).get("quotes", {}).get("quote")
             if not quote_data:
                 continue
@@ -874,7 +1027,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
             sma200, sma40, stoch_v, atr_v, hv_v = _get_market_techs(sym)
 
             e_date = earnings_db.get(sym)
-            exps = _cached_tradier_expirations(sym, api_tradier, token or "")
+            exps = get_tradier_expirations_cached(sym, api_tradier, token or "")
             if not exps or "expirations" not in exps:
                 continue
             exp_data = exps.get("expirations")
@@ -897,7 +1050,7 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
                     continue
                 if not (dte_r[0] <= dte <= dte_r[1]):
                     continue
-                chain = _cached_tradier_chain(sym, d_str, api_tradier, token or "")
+                chain = get_tradier_chain_cached(sym, d_str, api_tradier, token or "")
                 if not chain or "options" not in chain or not chain["options"]:
                     continue
                 opts = chain["options"]["option"]
@@ -1105,8 +1258,8 @@ def render_screener_page(user_id: int, run_scan: bool = False) -> None:
             unsafe_allow_html=True,
         )
 
-        if av_key:
-            av = _get_hybrid_overview(row["Ticker"], av_key)
+        if _get_shared_av_key() or av_key:
+            av = _shared_overview(row["Ticker"]) if _get_shared_av_key() else _get_hybrid_overview(row["Ticker"], av_key)
             if av:
                 up = round(((av["target"] - row["Precio"]) / row["Precio"]) * 100, 2)
                 st.markdown(
@@ -1584,10 +1737,11 @@ def run():
                 unique_tickers = list({t["ticker"] for t in trades_open})
                 mkt_prices = {}
                 if token:
-                    provider = TradierProvider(token, acc_data.get("environment") or "sandbox")
+                    api_base = "https://api.tradier.com/v1/" if (acc_data.get("environment") or "").lower() == "prod" else "https://sandbox.tradier.com/v1/"
                     for t in unique_tickers:
-                        q = provider.get_quote(t)
-                        mkt_prices[t] = q if isinstance(q, (int, float)) else 0.0
+                        q_res = get_tradier_quote_cached(t, api_base, token)
+                        quote_data = (q_res or {}).get("quotes", {}).get("quote")
+                        mkt_prices[t] = float(quote_data.get("last", 0) or 0) if quote_data else 0.0
                 else:
                     mkt_prices = {t: 0.0 for t in unique_tickers}
 

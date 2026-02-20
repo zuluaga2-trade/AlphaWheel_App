@@ -208,3 +208,30 @@ Para que **local (tu PC) y la versión web** usen los **mismos datos** (mismos u
      ```
 
 Con la misma URL en ambos sitios, la app usa siempre la base PostgreSQL en la nube: los datos son **idénticos** en local y en el navegador.
+
+### 5.4 Caché compartida (Tradier y Alpha Vantage) — opcional
+
+Para que la app consulte primero una **caché compartida por ticker** (menos llamadas a APIs, más rápida para todos los usuarios), puedes definir en **Secrets** o como **variables de entorno** cualquiera de estos nombres (la app acepta el que esté definido):
+
+| Uso | Nombre en Secrets / variable de entorno (equiv.) |
+|-----|-------------------------------------------------|
+| Token Tradier (cotizaciones, expiraciones, cadenas) | `ALPHAWHEEL_TRADIER_QUOTE_TOKEN` o `TRADIER_QUOTE_TOKEN` |
+| API key Alpha Vantage (earnings, overview) | `ALPHAWHEEL_AV_KEY` o `AV_KEY` |
+
+Ejemplo en Secrets (mismo bloque TOML que el resto):
+
+```toml
+ALPHAWHEEL_TRADIER_QUOTE_TOKEN = "tu_token_tradier_solo_lectura"
+# o TRADIER_QUOTE_TOKEN = "..."
+
+ALPHAWHEEL_AV_KEY = "tu_api_key_alphavantage"
+# o AV_KEY = "..."
+```
+
+En **local** también puedes usar variables de entorno (PowerShell):
+
+```powershell
+$env:TRADIER_QUOTE_TOKEN = "tu_token_tradier"
+$env:AV_KEY = "tu_api_key_alphavantage"
+py -m streamlit run app/Home.py
+```

@@ -37,7 +37,7 @@ from business.wheel import (
     get_campaign_premiums,
 )
 from reports.bitacora import export_trades_csv, export_trades_excel, export_trades_pdf, tax_efficiency_summary, get_trades_for_report, get_trade_filter_options
-from app.cockpit import render_screener_page, _render_screener_sidebar_form, _render_tutorial_tab
+from app.cockpit import render_screener_page, _render_screener_sidebar_form, _render_tutorial_tab, get_tradier_quote_cached
 import config
 
 # Inicializar BD al arranque
@@ -580,14 +580,15 @@ with tab_dash:
         if not trades_open:
             st.info("No hay posiciones abiertas. Usa el sidebar para registrar CSP, CC o compra directa.")
         else:
-            # Precios en tiempo real (Tradier)
+            # Precios en tiempo real (Tradier) — caché 5 min para no saturar API en cada rerun
             unique_tickers = list({t["ticker"] for t in trades_open})
             mkt_prices = {}
             if token:
-                provider = TradierProvider(token, acc_data.get("environment") or "sandbox")
+                api_base = "https://api.tradier.com/v1/" if (acc_data.get("environment") or "").lower() == "prod" else "https://sandbox.tradier.com/v1/"
                 for t in unique_tickers:
-                    q = provider.get_quote(t)
-                    mkt_prices[t] = q if isinstance(q, (int, float)) else 0.0
+                    q_res = get_tradier_quote_cached(t, api_base, token)
+                    quote_data = (q_res or {}).get("quotes", {}).get("quote")
+                    mkt_prices[t] = float(quote_data.get("last", 0) or 0) if quote_data else 0.0
             else:
                 mkt_prices = {t: 0.0 for t in unique_tickers}
 

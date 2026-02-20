@@ -46,3 +46,42 @@ PRECISION_DECIMALS = 2
 
 # Alertas: DTE por debajo de este valor se considera "expiración cercana"
 ALERT_DTE_THRESHOLD = 5
+
+
+# --- Caché compartida entre usuarios (Tradier y Alpha Vantage) ---
+# Secrets o variables de entorno (se usa la que esté definida):
+#   Tradier: ALPHAWHEEL_TRADIER_QUOTE_TOKEN o TRADIER_QUOTE_TOKEN
+#   Alpha Vantage: ALPHAWHEEL_AV_KEY o AV_KEY
+
+def get_shared_tradier_token():
+    """Token Tradier opcional para caché compartido. Variables de entorno equivalentes: ALPHAWHEEL_TRADIER_QUOTE_TOKEN o TRADIER_QUOTE_TOKEN."""
+    for name in ("ALPHAWHEEL_TRADIER_QUOTE_TOKEN", "TRADIER_QUOTE_TOKEN"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            return raw
+    try:
+        import streamlit as st
+        for name in ("ALPHAWHEEL_TRADIER_QUOTE_TOKEN", "TRADIER_QUOTE_TOKEN"):
+            val = st.secrets.get(name)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def get_shared_av_key():
+    """API key de Alpha Vantage opcional para caché compartido. Variables de entorno equivalentes: ALPHAWHEEL_AV_KEY o AV_KEY."""
+    for name in ("ALPHAWHEEL_AV_KEY", "AV_KEY"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            return raw
+    try:
+        import streamlit as st
+        for name in ("ALPHAWHEEL_AV_KEY", "AV_KEY"):
+            val = st.secrets.get(name)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
+    except Exception:
+        pass
+    return ""
