@@ -866,6 +866,22 @@ def close_trade(trade_id: int, account_id: int, closed_date: str, buyback_debit:
         conn.close()
 
 
+def close_trade_by_expiration(trade_id: int, account_id: int, closed_date: str):
+    """
+    Cierra un trade por vencimiento (opción expira sin valor, OTM). Registra close_type='expiration'
+    y buyback_debit=NULL. El P&L del trade es solo la prima recibida (sin restar débito).
+    """
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE Trade SET status = 'CLOSED', closed_date = ?, close_type = 'expiration', buyback_debit = NULL WHERE trade_id = ? AND account_id = ?",
+            (closed_date, trade_id, account_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_trade(trade_id: int, account_id: int, price: float = None, strike: float = None, expiration_date: str = None,
                  comment: str = None, quantity: int = None, trade_date: str = None):
     """Actualiza campos editables de un trade. OPTION: price, strike, expiration_date, comment. STOCK: price, quantity, trade_date, comment."""

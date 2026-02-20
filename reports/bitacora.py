@@ -108,16 +108,22 @@ def _get_trades_for_report(
             or (atype == "OPTION" and p_raw < 0)
         )
         if is_closing and atype == "OPTION":
-            r["close_type"] = r.get("close_type") or "buyback"
-            if r.get("buyback_debit") is not None:
-                try:
-                    r["buyback_debit"] = round2(float(r["buyback_debit"]))
-                except (TypeError, ValueError):
-                    r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else 0.0
+            # Cierre por vencimiento: prima queda como ganancia (total_usd positivo); no hay débito
+            if (r.get("close_type") or "").lower() == "expiration":
+                r["close_type"] = "expiration"
+                r["buyback_debit"] = None
+                # total_usd ya es la prima (positiva)
             else:
-                r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else round2(abs(r["total_usd"]))
-            # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
-            r["total_usd"] = -round2(float(r["buyback_debit"]))
+                r["close_type"] = r.get("close_type") or "buyback"
+                if r.get("buyback_debit") is not None:
+                    try:
+                        r["buyback_debit"] = round2(float(r["buyback_debit"]))
+                    except (TypeError, ValueError):
+                        r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else 0.0
+                else:
+                    r["buyback_debit"] = round2(abs(p_raw) * qty * 100) if qty else round2(abs(r["total_usd"]))
+                # Para que el neto del periodo sea correcto: recompra resta (total_usd negativo)
+                r["total_usd"] = -round2(float(r["buyback_debit"]))
     return rows
 
 

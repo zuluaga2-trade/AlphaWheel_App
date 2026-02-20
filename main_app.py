@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 
 from database import db
-from database.db import init_db, get_accounts_by_user, get_trades_by_account, get_account_by_id, close_trade, delete_account, get_dividends_by_account
+from database.db import init_db, get_accounts_by_user, get_trades_by_account, get_account_by_id, close_trade, close_trade_by_expiration, delete_account, get_dividends_by_account
 from business.wheel import close_trade_by_buyback
 from engine.calculations import (
     round2,
@@ -1166,6 +1166,13 @@ with tab_dash:
                                         value=date.today(),
                                         key=f"buyback_date_{selected_trade_id}",
                                     )
+                                    st.caption("Cerrar por vencimiento (opción expira sin valor, OTM):")
+                                    expiration_close_date_val = st.date_input(
+                                        "Fecha de vencimiento (cierre)",
+                                        value=edit_exp,
+                                        key=f"expiration_close_date_{selected_trade_id}",
+                                        help="Fecha en que la opción venció sin valor. Por defecto la fecha de expiración del contrato.",
+                                    )
                         col_save, col_del, col_close, _ = st.columns([1, 1, 1, 2])
                         with col_save:
                             if not is_recompra_trade and st.form_submit_button("Guardar cambios"):
@@ -1220,6 +1227,10 @@ with tab_dash:
                                     total_debit = round2(buyback_debit_val * 100 * qty_opt) if is_open_trade else 0.0
                                     close_trade_by_buyback(account_id, selected_trade_id, buyback_date_val.isoformat(), total_debit)
                                     st.success("Recompra registrada como movimiento; posición cerrada. El débito resta del total de la campaña.")
+                                    st.rerun()
+                                if not is_stock and st.form_submit_button("Cerrar por vencimiento"):
+                                    close_trade_by_expiration(selected_trade_id, account_id, expiration_close_date_val.isoformat())
+                                    st.success("Cierre por vencimiento registrado. La prima queda como ganancia (sin débito).")
                                     st.rerun()
                             elif not is_open_trade:
                                 st.caption("(Ya cerrado)")
