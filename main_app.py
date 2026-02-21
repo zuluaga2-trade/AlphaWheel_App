@@ -380,7 +380,7 @@ with st.sidebar:
                         else:
                             st.caption(f"Acciones de {ticker}: **{shares_now}** (necesitas {shares_needed} para {qty} contrato(s)).")
                     strike = st.number_input("Strike", min_value=0.0, value=0.0, step=0.5, key="add_cc_strike", help="Obligatorio: precio de ejercicio de la call.")
-                    premium = st.number_input("Prima por contrato", min_value=0.0, value=0.0, step=0.01, key="add_cc_premium")
+                    premium = st.number_input("Prima por acción", min_value=0.0, value=0.0, step=0.01, key="add_cc_premium", help="Mismo criterio que CSP: precio por acción. 1 contrato = 100 acciones.")
                     exp_default_cc = date.today() + timedelta(days=30)
                     exp_date_cc = st.date_input("Expiración", value=exp_default_cc, key="add_cc_exp")
                     exp = exp_date_cc.isoformat()
@@ -1005,13 +1005,16 @@ with tab_dash:
                 all_trades_historial = sorted(get_trades_by_account(account_id, ticker=ticker), key=lambda x: (x.get("trade_date") or "", x.get("trade_id") or 0))
                 st.caption(f"Todos los pasos de **{ticker}** (apertura + rolls). Cada roll conserva el registro anterior.")
                 if all_trades_historial:
+                    # Mostrar solo trades de tipo OPCIÓN (CSP/CC) para que al elegir el call/put aparezcan Cerrar por recompra y Cerrar por vencimiento
+                    option_trades_historial = [t for t in all_trades_historial if (t.get("asset_type") or "").upper() == "OPTION"]
+                    trades_for_selector = option_trades_historial if option_trades_historial else all_trades_historial
                     def _trade_label_main(t):
                         if (t.get("entry_type") or "").upper() == "CLOSING" and (t.get("price") or 0) < 0:
                             d = t.get("buyback_debit")
                             debit = safe_float(d) if d is not None else abs(safe_float(t.get("price")) * int(t.get("quantity") or 0) * 100)
                             return f"{str(t.get('trade_date', ''))[:10]} | Recompra | Débito ${fmt2(debit)} | Exp {str(t.get('expiration_date') or '')[:10]} | {t.get('status', '')}"
                         return f"{str(t.get('trade_date', ''))[:10]} | {t.get('strategy_type', '')} | Strike ${fmt2(t.get('strike'))} | Exp {str(t.get('expiration_date') or '')[:10]} | {t.get('status', '')}"
-                    trade_options = [(t["trade_id"], _trade_label_main(t)) for t in all_trades_historial]
+                    trade_options = [(t["trade_id"], _trade_label_main(t)) for t in trades_for_selector]
                     try:
                         prev_idx = int(st.session_state.get("sel_trade_gest", 0))
                     except (TypeError, ValueError):
@@ -1057,7 +1060,7 @@ with tab_dash:
                         f'</table></div>',
                         unsafe_allow_html=True,
                     )
-                    sel_trade_idx = st.selectbox("Seleccionar trade para editar o borrar", range(len(trade_options)), format_func=lambda i: trade_options[i][1], key="sel_trade_gest")
+                    sel_trade_idx = st.selectbox("Seleccionar trade para editar o borrar", range(len(trade_options)), format_func=lambda i: trade_options[i][1], key="sel_trade_gest", help="Elige la opción (CSP o CC) para cerrar por recompra o vencimiento.")
                     selected_trade_id = trade_options[sel_trade_idx][0]
                     campaign_root_id = get_campaign_root_id(account_id, selected_trade_id)
                     if campaign_root_id:
@@ -1073,7 +1076,7 @@ with tab_dash:
                                     db.upsert_campaign_adjustment(account_id, campaign_root_id, camp_comm, camp_fees)
                                     st.success("Ajustes guardados. Se restarán del neto de la campaña y del total realizado.")
                                     st.rerun()
-                    tr = next(t for t in all_trades_historial if t["trade_id"] == selected_trade_id)
+                    tr = next(t for t in trades_for_selector if t["trade_id"] == selected_trade_id)
                     is_open_trade = (tr.get("status") or "").upper() == "OPEN"
                     is_stock = (tr.get("asset_type") or "").upper() == "STOCK"
                     # Recompra: fila CLOSING (price < 0) o fila de apertura cerrada por recompra (close_type=buyback, formato antiguo)
@@ -1140,7 +1143,7 @@ with tab_dash:
                                     key=f"edit_strike_{selected_trade_id}",
                                 )
                                 edit_price = st.number_input(
-                                    "Prima por contrato",
+                                    "Prima por acción",
                                     value=float(tr.get("price") or 0),
                                     min_value=0.0,
                                     step=0.01,
@@ -1152,15 +1155,26 @@ with tab_dash:
                                 edit_exp = st.date_input("Expiración", value=exp_date_val, key=f"exp_date_{selected_trade_id}")
                                 edit_comment = st.text_area("Comentario", value=str(tr.get("comment") or ""), height=80, key=f"edit_comment_opt_{selected_trade_id}")
                                 if is_open_trade:
-                                    st.caption("Cerrar por recompra (comprar la opción):")
+                                    qty_opt = int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0)
+                                    st.markdown("---")
+                                    st.caption("**Cerrar por recompra** (comprar la opción): indica débito por acción, fecha y cuántos contratos cierras.")
+                                    buyback_contracts = st.number_input(
+                                        "Contratos a recomprar",
+                                        min_value=1,
+                                        max_value=max(1, qty_opt),
+                                        value=qty_opt,
+                                        step=1,
+                                        key=f"buyback_contracts_{selected_trade_id}",
+                                        help="Si tienes varios contratos y solo recompras una parte, elige cuántos. El resto sigue abierto.",
+                                    )
                                     buyback_debit_val = st.number_input(
-                                        "Precio por acción ($)",
+                                        "Precio por acción ($) — débito",
                                         min_value=0.0,
                                         value=0.0,
                                         step=0.01,
                                         format="%.2f",
                                         key=f"buyback_debit_{selected_trade_id}",
-                                        help="Mismo criterio que la prima: precio por acción. Ej: 0.02 → $2/contrato; 2 contratos = $4 total débito. Total = precio × 100 × contratos.",
+                                        help="Mismo criterio que la prima: precio por acción. Ej: 0.02 → $2/contrato; 2 contratos = $4 total. Total = precio × 100 × contratos a recomprar.",
                                     )
                                     buyback_date_val = st.date_input(
                                         "Fecha de recompra",
@@ -1223,11 +1237,10 @@ with tab_dash:
                                     st.success("Posición cerrada. Para un roll-over, añade ahora la nueva CSP/CC en el panel lateral.")
                                     st.rerun()
                                 if not is_stock and st.form_submit_button("Cerrar por recompra"):
-                                    # Total débito = precio por acción × 100 × contratos (mismo criterio que la prima)
-                                    qty_opt = int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0)
-                                    total_debit = round2(buyback_debit_val * 100 * qty_opt) if is_open_trade else 0.0
-                                    close_trade_by_buyback(account_id, selected_trade_id, buyback_date_val.isoformat(), total_debit)
-                                    st.success("Recompra registrada como movimiento; posición cerrada. El débito resta del total de la campaña.")
+                                    qty_recompra = int(buyback_contracts) if buyback_contracts else (int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0))
+                                    total_debit = round2(buyback_debit_val * 100 * qty_recompra) if is_open_trade else 0.0
+                                    close_trade_by_buyback(account_id, selected_trade_id, buyback_date_val.isoformat(), total_debit, quantity_to_close=qty_recompra)
+                                    st.success("Recompra registrada." + (" Posición cerrada." if qty_recompra >= (int(edit_quantity) if edit_quantity else int(tr.get("quantity") or 0)) else f" Quedan {int(edit_quantity or tr.get('quantity') or 0) - qty_recompra} contrato(s) abierto(s)."))
                                     st.rerun()
                                 if not is_stock and st.form_submit_button("Cerrar por vencimiento"):
                                     close_trade_by_expiration(selected_trade_id, account_id, expiration_close_date_val.isoformat())

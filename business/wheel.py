@@ -249,13 +249,21 @@ def get_campaign_premiums(account_id: int, trade_id: int) -> float:
     return round2(total)
 
 
-def close_trade_by_buyback(account_id: int, trade_id: int, closed_date: str, buyback_debit: float) -> Optional[int]:
+def close_trade_by_buyback(
+    account_id: int,
+    trade_id: int,
+    closed_date: str,
+    buyback_debit: float,
+    quantity_to_close: int = None,
+) -> Optional[int]:
     """
     Cierra una opción (CSP/CC) por recompra: registra la recompra como un movimiento más
-    en la campaña (nuevo trade con entry_type=CLOSING y price negativo) y cierra el trade original.
-    El débito resta de las primas totales de la campaña (get_campaign_premiums).
+    en la campaña (nuevo trade con entry_type=CLOSING y price negativo).
+    Si quantity_to_close es None o igual a la cantidad del trade, cierra el trade original por completo.
+    Si quantity_to_close < cantidad, cierra solo esa parte (recompra parcial): reduce la cantidad
+    del trade abierto y crea un trade de cierre solo por los contratos recomprados.
 
-    buyback_debit = total en USD pagado por recomprar (mismo criterio que prima: total = precio_por_acción × 100 × contratos).
+    buyback_debit = total en USD pagado por recomprar (precio_por_acción × 100 × contratos recomprados).
     Ej: 0.02 $/acción y 2 contratos → total = 4 $.
 
     Devuelve el trade_id del nuevo trade de recompra o None si falla.
@@ -266,15 +274,17 @@ def close_trade_by_buyback(account_id: int, trade_id: int, closed_date: str, buy
     qty = int(t.get("quantity") or 0)
     if qty <= 0:
         return None
+    qty_close = quantity_to_close if quantity_to_close is not None else qty
+    qty_close = max(1, min(qty_close, qty))
     debit = safe_float(buyback_debit)
-    # Precio por acción (negativo = débito): total / (100 × contratos)
-    price_per_contract = -(debit / (qty * 100))
+    # Precio por acción (negativo = débito): total / (100 × contratos recomprados)
+    price_per_contract = -(debit / (qty_close * 100)) if qty_close else 0.0
     price_stored = round(price_per_contract, 6) if price_per_contract else 0.0
     recompra_id = db.insert_trade(
         account_id=account_id,
         ticker=t["ticker"],
         asset_type="OPTION",
-        quantity=qty,
+        quantity=qty_close,
         price=price_stored,
         strike=t.get("strike"),
         expiration_date=t.get("expiration_date"),
@@ -286,10 +296,12 @@ def close_trade_by_buyback(account_id: int, trade_id: int, closed_date: str, buy
         parent_trade_id=trade_id,
         comment="Recompra",
     )
-    # Persistir débito en BD para no perder precisión y que reportes/cálculos lo usen
     if recompra_id:
         db.set_trade_buyback(recompra_id, account_id, debit)
-    db.close_trade(trade_id, account_id, closed_date)
+    if qty_close >= qty:
+        db.close_trade(trade_id, account_id, closed_date)
+    else:
+        db.update_trade(trade_id, account_id, quantity=qty - qty_close)
     return recompra_id
 
 
